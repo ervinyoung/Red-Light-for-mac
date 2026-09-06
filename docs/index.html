@@ -10,29 +10,31 @@
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://ervinyoung.github.io/midnight/">
 <meta property="og:image" content="https://ervinyoung.github.io/midnight/img/panel.png">
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23120000'/%3E%3Ccircle cx='32' cy='32' r='12' fill='%23c8200f'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230e0d0c'/%3E%3Ccircle cx='32' cy='32' r='12' fill='%23f0652a'/%3E%3C/svg%3E">
 <style>
-  :root{--void:#0d0e11;--canvas:#111318;--edge:rgba(255,255,255,.08);--snow:#fff;--mist:#9aa0ab;--ash:#6b7280;--amber:#f0a33a;--ink:#1a1108;
-    --sora:Sora,Inter,ui-sans-serif,system-ui,sans-serif;--inter:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif}
+  :root{
+    /* A warm, neutral black rather than the usual blue-tinted one: a page about removing blue should not be lit by it. */
+    --void:#0e0d0c;--edge:rgba(255,255,255,.08);--snow:#fff;--mist:#a39d96;--ash:#7b756e;
+    /* One accent, the ember the intro leaves behind. 5.9:1 on the background, so it holds even at label sizes. */
+    --ember:#f0652a;--ink:#0e0d0c;
+    --font:"SF Pro Rounded",ui-rounded,"SF Compact Rounded",-apple-system,BlinkMacSystemFont,system-ui,"Helvetica Neue",sans-serif;
+    --sora:var(--font);--inter:var(--font)}
   *{box-sizing:border-box}
   body{margin:0;background:var(--void);color:var(--snow);font-family:var(--inter);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
   a{color:inherit;text-decoration:none}
   .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
-  h1,h2,h3{font-family:var(--sora);letter-spacing:-.02em;margin:0}
+  h1,h2,h3{font-family:var(--font);letter-spacing:-.02em;margin:0;font-weight:700}
   .btn{display:inline-flex;align-items:center;gap:9px;height:44px;padding:0 22px;border-radius:999px;font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase;border:1px solid transparent;transition:transform .15s,background .15s;white-space:nowrap}
   .btn:hover{transform:translateY(-1px)}
-  .btn.white{background:#fff;color:#0d0e11;box-shadow:0 0 0 6px rgba(255,255,255,.06)}
-  .btn.line{border-color:rgba(255,255,255,.22)}
-  .btn.line:hover{border-color:rgba(255,255,255,.45)}
-  .btn.amber{background:var(--amber);color:var(--ink)}
+  .btn.white{background:#fff;color:var(--ink);box-shadow:0 0 0 6px rgba(255,255,255,.06)}
+  .btn.white:hover{background:#f3efea}
+  .btn.line{border-color:rgba(255,255,255,.28);color:var(--snow)}
+  .btn.line:hover{border-color:rgba(255,255,255,.55)}
   .btn.sm{height:36px;padding:0 16px;font-size:12px}
   .btn svg{width:15px;height:15px}
-  nav{position:fixed;inset-inline:0;top:0;z-index:50;background:rgba(13,14,17,.72);backdrop-filter:blur(16px);border-bottom:1px solid var(--edge)}
+  nav{position:fixed;inset-inline:0;top:0;z-index:50;background:rgba(14,13,12,.72);backdrop-filter:blur(16px);border-bottom:1px solid var(--edge)}
   nav .wrap{height:64px;display:flex;align-items:center;justify-content:space-between}
-  .brand{display:flex;align-items:center;gap:9px;font-family:var(--sora);font-weight:700;font-size:19px}
-  .brand svg{width:22px;height:22px}
+  .brand{font-family:var(--font);font-weight:700;font-size:19px;letter-spacing:-.01em}
   nav .right{display:flex;gap:10px;align-items:center}
 
   /* The field. Deep, dark red with no blue in it, over everything — the nav included. It plays once: scrolling
@@ -44,7 +46,7 @@
   .field .grain{position:absolute;inset:0;opacity:.12;mix-blend-mode:overlay;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
   .field .inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:var(--textop,1);transform:scale(calc(1 + .05*var(--p,0)))}
-  .field .mark{font-family:var(--sora);font-weight:600;letter-spacing:-.03em;line-height:1;font-size:clamp(56px,9vw,120px);color:rgb(214,72,0);opacity:.92;
+  .field .mark{font-family:var(--font);font-weight:700;letter-spacing:-.03em;line-height:1;font-size:clamp(56px,9vw,120px);color:rgb(214,72,0);opacity:.92;
     text-shadow:0 0 70px rgba(255,60,0,.35)}
   .field .cue{position:absolute;bottom:34px;left:50%;transform:translateX(-50%);font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:rgb(180,60,0);opacity:var(--textop,1);display:flex;flex-direction:column;align-items:center;gap:10px}
   .field .cue i{width:1px;height:34px;background:linear-gradient(180deg,rgb(200,70,0),transparent);display:block;animation:drip 2.4s ease-in-out infinite}
@@ -54,14 +56,14 @@
   .reveal{position:relative;height:calc(var(--pinh,100vh) + var(--budget,55vh))}
   .reveal.off{height:auto}.reveal.off .hero{position:relative}
   .hero{position:sticky;top:0;padding:112px 0 0;overflow:hidden;background:var(--void)}
-  .hero h1{font-size:clamp(52px,7.6vw,88px);font-weight:600;line-height:1.02}
-  .hero h1 .grad{background:linear-gradient(90deg,#fff 0%,#ffd39a 55%,#f0a33a 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero h1{font-size:clamp(52px,7.6vw,88px);font-weight:700;line-height:1.02;letter-spacing:-.025em}
+  .hero h1 .grad{color:var(--ember)}
   .hero .sub{font-size:clamp(16px,1.8vw,19px);color:var(--mist);max-width:560px;margin:20px 0 26px;line-height:1.5}
   .hero .ctas{display:flex;gap:12px;flex-wrap:wrap}
   .hero .fine{font-size:12.5px;color:var(--ash);margin-top:14px}
   .shot{position:relative;margin:40px auto 0;max-width:1032px;height:min(56vh,520px);border-radius:18px 18px 0 0;overflow:hidden;border:1px solid rgba(255,255,255,.12);border-bottom:0;filter:url(#hero);
     box-shadow:0 40px 120px rgba(0,0,0,.65);
-    background:radial-gradient(900px 420px at 50% 112%, rgba(240,163,58,.55), rgba(194,83,45,.35) 38%, rgba(20,14,22,0) 72%),linear-gradient(180deg,#1b2340 0%,#2a2447 30%,#5a2d3a 62%,#20151a 100%)}
+    background:radial-gradient(900px 420px at 50% 112%, rgba(240,163,58,.55), rgba(194,83,45,.35) 38%, rgba(20,14,22,0) 72%),linear-gradient(180deg,#1f1a2b 0%,#33213a 32%,#5a2d34 62%,#1d1512 100%)}
   .menubar{position:absolute;inset-inline:0;top:0;height:30px;background:rgba(20,20,24,.62);backdrop-filter:blur(20px);display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-size:12.5px;font-weight:500;color:#e8e8ec;border-bottom:1px solid rgba(255,255,255,.06)}
   .menubar .l{display:flex;gap:18px}.menubar .l b{font-weight:700}
   .menubar .r{display:flex;gap:14px;align-items:center}.menubar .r svg{width:15px;height:15px;opacity:.9}
@@ -69,16 +71,16 @@
   .panel{position:absolute;top:36px;right:96px;width:303px;border-radius:24px;overflow:hidden;box-shadow:0 22px 60px rgba(0,0,0,.6),0 0 0 .5px rgba(255,255,255,.14) inset;background:rgba(32,30,31,.88)}
   .panel img{display:block;width:100%;height:auto}
   .shot .cap{position:absolute;left:28px;bottom:24px;font-size:13px;color:rgba(255,255,255,.7)}
-  .shot .cap b{display:block;font-family:var(--sora);font-size:20px;color:#fff;margin-bottom:4px}
+  .shot .cap b{display:block;font-family:var(--font);font-size:20px;font-weight:700;color:#fff;margin-bottom:4px}
 
   section{padding:72px 0;border-top:1px solid var(--edge)}
   .three{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
-  .three .k{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);font-weight:600}
-  .three h3{font-size:22px;font-weight:600;margin:10px 0 8px;line-height:1.15}
+  .three .k{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--ember);font-weight:600}
+  .three h3{font-size:22px;font-weight:700;margin:10px 0 8px;line-height:1.15}
   .three p{color:var(--mist);font-size:15px;margin:0;line-height:1.55}
   footer{border-top:1px solid var(--edge);padding:34px 0 40px;color:var(--ash);font-size:13px}
   footer .wrap{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px}
-  footer a{color:var(--mist)}footer a:hover{color:#fff}
+  footer a{color:var(--mist)}footer a:hover{color:var(--ember)}
   @media (prefers-reduced-motion:reduce){.field,.rim{display:none}.reveal{height:auto}.hero{position:relative}}
   @media (max-width:860px){.three{grid-template-columns:1fr}.panel{right:12px;width:270px}.shot{height:440px}.shot .cap{display:none}nav .line{display:none}}
 </style>
@@ -96,10 +98,10 @@
 <div class="rim" id="rim" aria-hidden="true"></div>
 
 <nav><div class="wrap">
-  <a class="brand" href="#"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30" fill="#1a0000"/><circle cx="32" cy="32" r="12" fill="#f0a33a"/></svg>Midnight</a>
+  <a class="brand" href="#">Midnight</a>
   <div class="right">
     <a class="btn line sm" href="https://github.com/ervinyoung/midnight">Source</a>
-    <a class="btn amber sm" href="https://github.com/ervinyoung/midnight#install"><svg viewBox="0 0 17 20" fill="currentColor"><path d="M14.1 10.6c0-2.7 2.2-3.9 2.3-4-1.3-1.8-3.2-2.1-3.9-2.1-1.7-.2-3.2 1-4.1 1-.8 0-2.1-1-3.5-.9C3.1 4.6 1.4 5.6.5 7.3c-1.9 3.3-.5 8.1 1.4 10.8.9 1.3 2 2.8 3.4 2.7 1.4-.1 1.9-.9 3.5-.9s2.1.9 3.5.9c1.5 0 2.4-1.3 3.3-2.7 1-1.5 1.5-3 1.5-3.1-.1 0-2.9-1.1-3-4.4zM11.4 2.7c.7-.9 1.2-2.1 1.1-3.3-1 0-2.3.7-3 1.6-.7.8-1.3 2-1.1 3.2 1.1.1 2.3-.6 3-1.5z"/></svg>Download for Mac</a>
+    <a class="btn white sm" href="https://github.com/ervinyoung/midnight#install"><svg viewBox="0 0 17 20" fill="currentColor"><path d="M14.1 10.6c0-2.7 2.2-3.9 2.3-4-1.3-1.8-3.2-2.1-3.9-2.1-1.7-.2-3.2 1-4.1 1-.8 0-2.1-1-3.5-.9C3.1 4.6 1.4 5.6.5 7.3c-1.9 3.3-.5 8.1 1.4 10.8.9 1.3 2 2.8 3.4 2.7 1.4-.1 1.9-.9 3.5-.9s2.1.9 3.5.9c1.5 0 2.4-1.3 3.3-2.7 1-1.5 1.5-3 1.5-3.1-.1 0-2.9-1.1-3-4.4zM11.4 2.7c.7-.9 1.2-2.1 1.1-3.3-1 0-2.3.7-3 1.6-.7.8-1.3 2-1.1 3.2 1.1.1 2.3-.6 3-1.5z"/></svg>Download for Mac</a>
   </div>
 </div></nav>
 
