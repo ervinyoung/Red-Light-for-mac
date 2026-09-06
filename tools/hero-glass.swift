@@ -96,7 +96,7 @@ draw("Zero blue.", 104, .bold, .white, NSPoint(x: 96, y: 520), -3)
 draw("Sleep better.", 104, .bold, NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1), NSPoint(x: 96, y: 408), -3)
 let grey = NSColor(white: 0.66, alpha: 1)
 draw("Blue light after sunset is the cheapest sleep loss you are still paying for.", 24, .regular, grey, NSPoint(x: 100, y: 340), 0)
-draw("Red Light drives your Mac to zero blue at sunset, in a panel that looks like Apple made it. Free.", 24, .regular, grey, NSPoint(x: 100, y: 304), 0)
+draw("Red Light drives your Mac to zero blue at sunset, in a native macOS 27 menu bar panel. Free.", 24, .regular, grey, NSPoint(x: 100, y: 304), 0)
 draw("ervinyoung.github.io/Red-Light-for-mac", 18, .semibold, NSColor(white: 0.46, alpha: 1), NSPoint(x: 100, y: 96), 0.5)
 NSGraphicsContext.current = saved
 print("composited")
