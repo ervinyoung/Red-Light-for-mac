@@ -21,7 +21,7 @@ gh api -X POST "repos/$LOGIN/midnight/pages" -f 'source[branch]=main' -f 'source
   || gh api -X PUT "repos/$LOGIN/midnight/pages" -f 'source[branch]=main' -f 'source[path]=/docs' >/dev/null
 gh repo edit "$LOGIN/midnight" --add-topic macos --add-topic blue-light --add-topic sleep --add-topic menu-bar --add-topic swift >/dev/null 2>&1 || true
 echo "→ release"
-ZIP="../Midnight-2.0-macos26-arm64.zip"
+ZIP="../Midnight-2.1-macos26-arm64.zip"
 gh release view v2.1 >/dev/null 2>&1 || gh release create v2.1 "$ZIP" --title "Midnight 2.1" --notes "Prebuilt Midnight.app and the midnight engine for Apple silicon, macOS 26+. Ad-hoc signed: right-click › Open the first time. Building from source with ./install.sh is recommended."
 echo
 echo "Site:    https://$LOGIN.github.io/midnight/   (Pages takes a minute or two on first publish)"
