@@ -669,7 +669,7 @@ struct SettingsPage: View {
             }
             HStack(spacing: 8) {
                 PillButton(title: "Use My Location", drawn: m.snapshotMode) { m.useMyLocation() }
-                PillButton(title: editingLocation ? "Cancel" : "Enter Coordinates…", drawn: m.snapshotMode) { editingLocation.toggle() }
+                PillButton(title: editingLocation ? "Cancel" : "Enter Manually…", drawn: m.snapshotMode) { editingLocation.toggle() }
                 Spacer()
             }.frame(height: 32)
             if editingLocation {

@@ -2,7 +2,16 @@
 Warm light after dark. Nightfall eases your Mac into a low-blue-light look at sunset and back at sunrise,
 dims the keyboard further than the slider allows, and quietly learns what you keep choosing.
 
-Site: https://ervinyoung.github.io/nightfall — Install: `git clone https://github.com/ervinyoung/nightfall && cd nightfall && ./install.sh` (Apple silicon, macOS 26+, Xcode Command Line Tools). Everything then lives in `~/Library/Application Support/Nightfall`; the menu bar app is `~/Applications/Nightfall.app`.
+Site: https://ervinyoung.github.io/nightfall
+
+## Install
+Apple silicon Mac, macOS 26 or later, Xcode Command Line Tools (`xcode-select --install`).
+
+    git clone https://github.com/ervinyoung/nightfall && cd nightfall && ./install.sh
+
+The installer builds the engine and the menu bar app from source, seeds a config, and starts the sunrise/sunset agent.
+Everything then lives in `~/Library/Application Support/Nightfall`; the menu bar app is `~/Applications/Nightfall.app`.
+A prebuilt, ad-hoc-signed build is on the Releases page (right-click › Open the first time).
 
 ## Terminal
 Make a shortcut once:
