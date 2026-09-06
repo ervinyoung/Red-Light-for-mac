@@ -537,7 +537,7 @@ struct GlassSlider: View {
         HStack(spacing: 10) {
             Image(systemName: minIcon).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 18)
             Slider(value: position, in: 0...Double(max(1, steps.count - 1))) { editing in if !editing { finish() } }
-                .controlSize(.large)
+                .controlSize(.regular)      // Control Center's knob is 20 pt; .large draws 24
             Image(systemName: maxIcon).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 18)
         }
     }
