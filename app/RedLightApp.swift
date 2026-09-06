@@ -843,7 +843,7 @@ func snapshotIfRequested() {
         model.refresh()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             let ap = NSAppearance(named: args.contains("light") ? .aqua : .darkAqua)
-            let host = NSHostingView(rootView: SnapshotRoot(m: model, page: page, light: args.contains("light")))
+            let host = NSHostingView(rootView: SnapshotRoot(m: model, page: page, light: args.contains("light"), clear: args.contains("clear")))
             host.appearance = ap
             host.frame = NSRect(x: 0, y: 0, width: 303, height: 10)
             let win = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
@@ -868,12 +868,13 @@ func snapshotIfRequested() {
     app.run()
 }
 struct SnapshotRoot: View {
-    @ObservedObject var m: Model; let page: String; var light = false
+    @ObservedObject var m: Model; let page: String; var light = false; var clear = false
     var body: some View {
         Group { if page == "main" { Panel(m: m) } else { SettingsPage(m: m, back: {}) .frame(width: 303) } }
             .fixedSize(horizontal: false, vertical: true)
-            // stands in for the system glass in the export, at the tone each appearance shows through it
-            .background(light ? Color(white: 0.96) : Color(white: 0.13))
+            // stands in for the system glass in the export; `clear` leaves it out so the panel can be
+            // composited over real artwork with a real blurred backdrop
+            .background(clear ? Color.clear : (light ? Color(white: 0.96) : Color(white: 0.13)))
     }
 }
 
