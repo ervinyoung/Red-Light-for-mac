@@ -4,14 +4,14 @@ import Carbon
 import CoreLocation
 import ServiceManagement
 
-// MARK: - Shared files (same as the midnight CLI)
-let appDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Midnight")
-let cliURL = appDir.appendingPathComponent("midnight")
+// MARK: - Shared files (same as the redlight CLI)
+let appDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/RedLight")
+let cliURL = appDir.appendingPathComponent("redlight")
 let configURL = appDir.appendingPathComponent("config.json")
 let stateURL = appDir.appendingPathComponent("state.json")
 let learnedURL = appDir.appendingPathComponent("learned.json")
 let shadeURL = appDir.appendingPathComponent("shade.json")
-let agentLabel = "com.ervinyoung.midnight"
+let agentLabel = "com.ervinyoung.redlight"
 
 struct Settings: Codable {
     var filterEnabled: Bool?; var filterType: Int?; var hue: Double?; var intensity: Double?
@@ -209,7 +209,7 @@ final class Model: ObservableObject {
     let overlay = ShadeOverlay()
     let gamma = Gamma()
     let locator = Locator()
-    let liveQueue = DispatchQueue(label: "midnight.live")
+    let liveQueue = DispatchQueue(label: "redlight.live")
     private var source: DispatchSourceFileSystemObject?
     private var monitor: Any?
     private var refreshWork: DispatchWorkItem?
@@ -572,7 +572,7 @@ struct Panel: View {
     }
     var mainPage: some View {
         VStack(spacing: 0) {
-            TitleBlock(title: "Midnight", subtitle: subtitle) {
+            TitleBlock(title: "Red Light", subtitle: subtitle) {
                 SwitchView(isOn: Binding(get: { m.agentRunning }, set: { m.setAgent($0) }), drawn: m.snapshotMode)
             }
 
@@ -614,7 +614,7 @@ struct Panel: View {
             if m.agentRunning {
                 Header(text: m.isPaused ? "Paused" : "Pause")
                 if m.isPaused {
-                    IconRow(icon: "play.fill", label: "Resume Midnight").onTapGesture { m.resume() }
+                    IconRow(icon: "play.fill", label: "Resume Red Light").onTapGesture { m.resume() }
                 } else {
                     IconRow(icon: "pause.fill", label: "For an Hour").onTapGesture { m.pause("60") }
                     IconRow(icon: "sunrise.fill", label: "Until Sunrise").onTapGesture { m.pause("sunrise") }
@@ -622,7 +622,7 @@ struct Panel: View {
                 SectionEnd()
             }
 
-            SettingsRow(text: "Midnight Settings…").onTapGesture { page = "settings" }
+            SettingsRow(text: "Red Light Settings…").onTapGesture { page = "settings" }
         }
         .padding(.horizontal, CC.side)
     }
@@ -670,7 +670,7 @@ struct SettingsPage: View {
     let fades: [(String, Double)] = [("Instant", 0), ("10 min", 10), ("20 min", 20), ("30 min", 30), ("45 min", 45), ("1 hr", 60)]
     var body: some View {
         VStack(spacing: 0) {
-            TitleBlock(title: "Midnight Settings", subtitle: "Sunrise \(m.sunriseText) · Sunset \(m.sunsetText)") {
+            TitleBlock(title: "Red Light Settings", subtitle: "Sunrise \(m.sunriseText) · Sunset \(m.sunsetText)") {
                 PillButton(title: "Done", drawn: m.snapshotMode) { back() }
             }
 
@@ -727,9 +727,9 @@ struct SettingsPage: View {
             SectionEnd()
             TextRow(text: "Show Files in Finder").onTapGesture { NSWorkspace.shared.open(appDir) }
             Line()
-            TextRow(text: "View Log").onTapGesture { NSWorkspace.shared.open(appDir.appendingPathComponent("midnight.log")) }
+            TextRow(text: "View Log").onTapGesture { NSWorkspace.shared.open(appDir.appendingPathComponent("redlight.log")) }
             Line()
-            SettingsRow(text: "Quit Midnight").onTapGesture { NSApp.terminate(nil) }
+            SettingsRow(text: "Quit Red Light").onTapGesture { NSApp.terminate(nil) }
         }
         .padding(.horizontal, CC.side)
         .onAppear { lat = String(m.config.latitude); lon = String(m.config.longitude) }
@@ -752,7 +752,7 @@ func enforceSingleInstance() {
     let others = NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == me.bundleIdentifier && $0.processIdentifier != me.processIdentifier }
     if !others.isEmpty { NSApp.terminate(nil); exit(0) }
 }
-/// `Midnight --snapshot out.png [settings]` renders the panel to a PNG for documentation, off-screen, in dark
+/// `Red Light --snapshot out.png [settings]` renders the panel to a PNG for documentation, off-screen, in dark
 /// appearance, on a dark backdrop. No screen-recording grant is needed; system glass is not part of the view.
 func snapshotIfRequested() {
     let args = CommandLine.arguments
@@ -801,7 +801,7 @@ struct SnapshotRoot: View {
 }
 
 @main
-struct MidnightApp: App {
+struct RedLightApp: App {
     @StateObject var model = Model()
     init() { snapshotIfRequested(); enforceSingleInstance() }
     var body: some Scene {

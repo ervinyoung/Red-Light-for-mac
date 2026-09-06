@@ -1,12 +1,10 @@
 #!/bin/zsh
-# Builds Midnight.app into ~/Applications. Needs Xcode Command Line Tools with a macOS 26 SDK.
+# Builds Red Light.app into ~/Applications
 set -e
 cd "$(dirname "$0")"
-APP="$HOME/Applications/Midnight.app"
-SDK=$(ls -d /Library/Developer/CommandLineTools/SDKs/MacOSX26*.sdk 2>/dev/null | head -1)
-[ -z "$SDK" ] && SDK=$(xcrun --sdk macosx --show-sdk-path)
+APP="$HOME/Applications/Red Light.app"
 mkdir -p "$APP/Contents/MacOS" "$HOME/Applications"
-swiftc -O -parse-as-library -target arm64-apple-macos26.0 -sdk "$SDK" MidnightApp.swift -o "$APP/Contents/MacOS/Midnight"
+swiftc -O -parse-as-library -target arm64-apple-macos26.0 -sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk RedLightApp.swift -o "$APP/Contents/MacOS/RedLight"
 cp Info.plist "$APP/Contents/Info.plist"
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 echo "built $APP"

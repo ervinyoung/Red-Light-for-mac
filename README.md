@@ -1,44 +1,44 @@
 <p align="center">
-  <a href="https://ervinyoung.github.io/midnight/"><img src="docs/img/hero.png" alt="Midnight — Zero blue. Sleep better. The Midnight panel in the macOS menu bar." width="100%"></a>
+  <a href="https://ervinyoung.github.io/red-light-for-mac/"><img src="docs/img/hero.png" alt="Red Light for Mac — Zero blue. Sleep better. The Red Light panel in the macOS menu bar." width="100%"></a>
 </p>
 
-# Midnight
+# Red Light
 Zero blue light after sunset, on your Mac. Blue light after dark is the cheapest sleep loss you are still paying for:
-it holds melatonin down and pushes your clock later. Midnight drives the display's blue channel to zero at sunset,
+it holds melatonin down and pushes your clock later. Red Light drives the display's blue channel to zero at sunset,
 holds deep, true reds through the night, dims the keyboard below the system floor, and hands the day back at sunrise.
 In a panel indistinguishable from Control Center. Free, open source, on-device, and it learns what you keep choosing.
 
-Site: https://ervinyoung.github.io/midnight
+Site: https://ervinyoung.github.io/red-light-for-mac
 
 ## Install
 Apple silicon Mac, macOS 26 or later, Xcode Command Line Tools (`xcode-select --install`).
 
-    git clone https://github.com/ervinyoung/midnight && cd midnight && ./install.sh
+    git clone https://github.com/ervinyoung/red-light-for-mac && cd red-light-for-mac && ./install.sh
 
 The installer builds the engine and the menu bar app from source, seeds a config, and starts the sunrise/sunset agent.
-Everything then lives in `~/Library/Application Support/Midnight`; the menu bar app is `~/Applications/Midnight.app`.
+Everything then lives in `~/Library/Application Support/RedLight`; the menu bar app is `~/Applications/Red Light.app`.
 A prebuilt, ad-hoc-signed build is on the Releases page (right-click › Open the first time).
 
 ## Terminal
 Make a shortcut once:
-    echo 'alias midnight="$HOME/Library/Application\ Support/Midnight/midnight"' >> ~/.zshrc && source ~/.zshrc
+    echo 'alias redlight="$HOME/Library/Application\ Support/Red Light/redlight"' >> ~/.zshrc && source ~/.zshrc
 
-    midnight status              mode, fade progress, pause, sun times, current settings, location
-    midnight suntimes            today's sunrise / sunset and the effective switch times
-    midnight night | day         switch now (instant, no fade)
-    midnight pause 60            pause for 60 minutes (restores the day look, learns nothing meanwhile)
-    midnight pause sunrise       pause until the next sunrise
-    midnight resume
-    midnight set warmth 80       the unified control, 0–100 or off (see below)
-    midnight set keyboard 0.3    keyboard backlight in percent (0.1–30) or off
-    midnight set idle 30         keys off after N seconds of inactivity
-    midnight set shade 40        screen shade 0–90 or off
-    midnight preset list | apply "Night" | save "Reading" book.fill | night "Night" | delete "Reading"
-    midnight shade on|off|toggle|up|down|<0-90>
-    midnight location 37.43 -122.14 [manual|auto]
-    midnight learned | forget
-    midnight curve               print the warmth curve
-`sunmode` still works as an alias of `midnight`.
+    redlight status              mode, fade progress, pause, sun times, current settings, location
+    redlight suntimes            today's sunrise / sunset and the effective switch times
+    redlight night | day         switch now (instant, no fade)
+    redlight pause 60            pause for 60 minutes (restores the day look, learns nothing meanwhile)
+    redlight pause sunrise       pause until the next sunrise
+    redlight resume
+    redlight set warmth 80       the unified control, 0–100 or off (see below)
+    redlight set keyboard 0.3    keyboard backlight in percent (0.1–30) or off
+    redlight set idle 30         keys off after N seconds of inactivity
+    redlight set shade 40        screen shade 0–90 or off
+    redlight preset list | apply "Night" | save "Reading" book.fill | night "Night" | delete "Reading"
+    redlight shade on|off|toggle|up|down|<0-90>
+    redlight location 37.43 -122.14 [manual|auto]
+    redlight learned | forget
+    redlight curve               print the warmth curve
+`sunmode` still works as an alias of `redlight`.
 
 ## Red Shift: one slider, two mechanisms
 Two ways to cut blue light have opposite strengths. Scaling the display's blue and green channels at the
@@ -47,7 +47,7 @@ ordering, so text stays crisp — but it cannot go "beyond zero", and content th
 channel goes dark. Apple's Color Tint filter maps each pixel to its luminance and mixes toward red: nothing
 disappears, but hue collapses, and at high intensity everything is the same red blob.
 
-Midnight's Red Shift (`warmth` in the config and CLI) uses each where it is best:
+Red Light's Red Shift (`warmth` in the config and CLI) uses each where it is best:
     0–60 %    channel scaling only: blue 100 % → 0, green trimmed to 60 %. Maximum legibility.
     60–100 %  blue stays at zero; green eases to 35 % while a modest luminance-preserving tint (up to 50 %)
               folds the removed green back into red brightness instead of letting it fade to black.
@@ -67,7 +67,7 @@ Every minute the engine compares the current settings with what it last saw; a d
 recorded in `events.jsonl`. It never fights a change in the moment. When the value you settle on at night is
 about the same on 3 of the last 14 nights it becomes the night default, and when you switch warmth on or off
 by hand near a transition on 3 nights, the transition moves (never more than 2 hours). One notification, at
-most once a day. `learned.json` holds what it adopted and a dated history; `midnight forget` clears it.
+most once a day. `learned.json` holds what it adopted and a dated history; `redlight forget` clears it.
 
 ## Files
     config.json      night preset, day defaults, location + source, fade length, learning, presets, shortcuts
@@ -76,7 +76,7 @@ most once a day. `learned.json` holds what it adopted and a dated history; `midn
     events.jsonl     observed manual changes (pruned past the lookback window)
     shade.json       what the app should draw: shade overlay, warmth, gamma multipliers
     commanded.json   the keyboard brightness last set (the hardware reports 0 once it idle-dims)
-    midnight.log    transitions, noticed changes, learned adjustments
+    redlight.log    transitions, noticed changes, learned adjustments
     legacy/          the previous SunsetMode install, archived
 
 ## Menu bar app
@@ -85,5 +85,5 @@ Panel: Warmth · Screen Shade · Keyboard Backlight · Turn Off After Inactivity
 apply live) · Presets (tap to apply; right-click for Use at Sunset / Replace / Delete; + saves the current
 look) · Pause · Settings. Global shortcuts: ⌃⌥⌘S toggles the shade, ⌃⌥⌘↑ / ⌃⌥⌘↓ adjust it.
 Shade and warmth exist only while the app runs (macOS restores the gamma table when it exits).
-Rebuild the engine: `swiftc -O midnight.swift -o midnight`. Rebuild the app: `gui/build.sh`.
-Agent: `launchctl bootout gui/$(id -u)/com.ervinyoung.midnight` / `bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ervinyoung.midnight.plist`
+Rebuild the engine: `swiftc -O redlight.swift -o redlight`. Rebuild the app: `gui/build.sh`.
+Agent: `launchctl bootout gui/$(id -u)/com.ervinyoung.redlight` / `bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ervinyoung.redlight.plist`

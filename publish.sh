@@ -10,19 +10,19 @@ if [ "$LOGIN" != "ervinyoung" ]; then
   sed -i '' "s#ervinyoung.github.io#$LOGIN.github.io#g; s#github.com/ervinyoung#github.com/$LOGIN#g" docs/index.html README.md
   git add -A && git commit -q -m "Point links at $LOGIN" || true
 fi
-if ! gh repo view "$LOGIN/midnight" >/dev/null 2>&1; then
-  gh repo create "$LOGIN/midnight" --public --description "Warm light after dark, for Mac. Zero blue at 60%, a keyboard dimmer than the slider allows, and it learns your nights." --homepage "https://$LOGIN.github.io/midnight/" --source . --remote origin --push
+if ! gh repo view "$LOGIN/red-light-for-mac" >/dev/null 2>&1; then
+  gh repo create "$LOGIN/red-light-for-mac" --public --description "Warm light after dark, for Mac. Zero blue at 60%, a keyboard dimmer than the slider allows, and it learns your nights." --homepage "https://$LOGIN.github.io/red-light-for-mac/" --source . --remote origin --push
 else
-  git remote get-url origin >/dev/null 2>&1 || git remote add origin "https://github.com/$LOGIN/midnight.git"
+  git remote get-url origin >/dev/null 2>&1 || git remote add origin "https://github.com/$LOGIN/red-light-for-mac.git"
   git push -u origin main
 fi
 echo "→ enabling GitHub Pages from /docs"
-gh api -X POST "repos/$LOGIN/midnight/pages" -f 'source[branch]=main' -f 'source[path]=/docs' >/dev/null 2>&1 \
-  || gh api -X PUT "repos/$LOGIN/midnight/pages" -f 'source[branch]=main' -f 'source[path]=/docs' >/dev/null
-gh repo edit "$LOGIN/midnight" --add-topic macos --add-topic blue-light --add-topic sleep --add-topic menu-bar --add-topic swift >/dev/null 2>&1 || true
+gh api -X POST "repos/$LOGIN/red-light-for-mac/pages" -f 'source[branch]=main' -f 'source[path]=/docs' >/dev/null 2>&1 \
+  || gh api -X PUT "repos/$LOGIN/red-light-for-mac/pages" -f 'source[branch]=main' -f 'source[path]=/docs' >/dev/null
+gh repo edit "$LOGIN/red-light-for-mac" --add-topic macos --add-topic blue-light --add-topic sleep --add-topic menu-bar --add-topic swift >/dev/null 2>&1 || true
 echo "→ release"
-ZIP="../Midnight-2.1-macos26-arm64.zip"
-gh release view v2.1 >/dev/null 2>&1 || gh release create v2.1 "$ZIP" --title "Midnight 2.1" --notes "Prebuilt Midnight.app and the midnight engine for Apple silicon, macOS 26+. Ad-hoc signed: right-click › Open the first time. Building from source with ./install.sh is recommended."
+ZIP="../RedLight-2.2-macos26-arm64.zip"
+gh release view v2.2 >/dev/null 2>&1 || gh release create v2.2 "$ZIP" --title "Red Light 2.2" --notes "Prebuilt Red Light.app and the redlight engine for Apple silicon, macOS 26+. Ad-hoc signed: right-click › Open the first time. Building from source with ./install.sh is recommended."
 echo
-echo "Site:    https://$LOGIN.github.io/midnight/   (Pages takes a minute or two on first publish)"
-echo "Repo:    https://github.com/$LOGIN/midnight"
+echo "Site:    https://$LOGIN.github.io/redlight/   (Pages takes a minute or two on first publish)"
+echo "Repo:    https://github.com/$LOGIN/red-light-for-mac"

@@ -1,15 +1,15 @@
 #!/bin/zsh
-# Midnight installer: builds the engine and the menu bar app from source, seeds a config, starts the agent.
+# Red Light installer: builds the engine and the menu bar app from source, seeds a config, starts the agent.
 # Requires: Apple silicon Mac, macOS 26 or later, Xcode Command Line Tools (xcode-select --install).
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
-DIR="$HOME/Library/Application Support/Midnight"
+DIR="$HOME/Library/Application Support/RedLight"
 mkdir -p "$DIR/gui" "$HOME/Library/LaunchAgents" "$HOME/Applications"
 echo "→ building engine"
-cp "$HERE/engine/midnight.swift" "$DIR/midnight.swift"
-swiftc -O "$DIR/midnight.swift" -o "$DIR/midnight"
+cp "$HERE/engine/redlight.swift" "$DIR/redlight.swift"
+swiftc -O "$DIR/redlight.swift" -o "$DIR/redlight"
 echo "→ building app"
-cp "$HERE/app/MidnightApp.swift" "$HERE/app/Info.plist" "$HERE/app/build.sh" "$DIR/gui/"
+cp "$HERE/app/RedLightApp.swift" "$HERE/app/Info.plist" "$HERE/app/build.sh" "$DIR/gui/"
 chmod +x "$DIR/gui/build.sh"; "$DIR/gui/build.sh"
 if [ ! -f "$DIR/config.json" ]; then
   echo "→ writing default config (location will be resolved by the app; edit config.json to override)"
@@ -35,23 +35,23 @@ if [ ! -f "$DIR/config.json" ]; then
 JSON
 fi
 echo "→ installing the sunrise/sunset agent"
-PLIST="$HOME/Library/LaunchAgents/com.ervinyoung.midnight.plist"
+PLIST="$HOME/Library/LaunchAgents/com.ervinyoung.redlight.plist"
 cat > "$PLIST" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>com.ervinyoung.midnight</string>
-  <key>ProgramArguments</key><array><string>$DIR/midnight</string><string>check</string></array>
+  <key>Label</key><string>com.ervinyoung.redlight</string>
+  <key>ProgramArguments</key><array><string>$DIR/redlight</string><string>check</string></array>
   <key>RunAtLoad</key><true/>
   <key>StartInterval</key><integer>60</integer>
   <key>StandardOutPath</key><string>$DIR/launchd.out.log</string>
   <key>StandardErrorPath</key><string>$DIR/launchd.err.log</string>
 </dict></plist>
 PL
-launchctl bootout "gui/$(id -u)/com.ervinyoung.midnight" 2>/dev/null || true
+launchctl bootout "gui/$(id -u)/com.ervinyoung.redlight" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
-ln -sf "$DIR/midnight" "$DIR/sunmode"
-open "$HOME/Applications/Midnight.app"
+ln -sf "$DIR/redlight" "$DIR/sunmode"
+open "$HOME/Applications/Red Light.app"
 echo
-echo "Midnight is installed. Look for the sunset icon in the menu bar."
-echo "Terminal shortcut:  echo 'alias midnight=\"\$HOME/Library/Application\\ Support/Midnight/midnight\"' >> ~/.zshrc"
+echo "Red Light is installed. Look for the sunset icon in the menu bar."
+echo "Terminal shortcut:  echo 'alias redlight=\"\$HOME/Library/Application\\ Support/Red Light/redlight\"' >> ~/.zshrc"

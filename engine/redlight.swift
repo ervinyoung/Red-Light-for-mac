@@ -1,18 +1,18 @@
-// midnight — eases the Mac into a warm, low-blue-light look after sunset and back again at sunrise,
+// redlight — eases the Mac into a warm, low-blue-light look after sunset and back again at sunrise,
 // and quietly learns from manual adjustments.
-// Usage: midnight check | night | day | pause <min>|sunrise | resume | set <field> <value> | preset … |
+// Usage: redlight check | night | day | pause <min>|sunrise | resume | set <field> <value> | preset … |
 //        shade … | location <lat> <lon> [auto|manual] | reapply | status | suntimes | learned | forget
 import Foundation
 
-let appDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Midnight")
+let appDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/RedLight")
 let configURL  = appDir.appendingPathComponent("config.json")
 let stateURL   = appDir.appendingPathComponent("state.json")
 let learnedURL = appDir.appendingPathComponent("learned.json")
 let eventsURL  = appDir.appendingPathComponent("events.jsonl")
-let logURL     = appDir.appendingPathComponent("midnight.log")
+let logURL     = appDir.appendingPathComponent("redlight.log")
 let shadeURL   = appDir.appendingPathComponent("shade.json")      // what the menu bar app should draw: shade overlay + gamma
 let cmdURL     = appDir.appendingPathComponent("commanded.json")
-let appProcessName = "Midnight"
+let appProcessName = "RedLight"
 
 func log(_ s: String) {
     let line = "\(ISO8601DateFormatter().string(from: Date())) \(s)\n"
@@ -23,7 +23,7 @@ func log(_ s: String) {
 func notify(_ msg: String) {
     let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
     let esc = msg.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-    p.arguments = ["-e", "display notification \"\(esc)\" with title \"Midnight\""]
+    p.arguments = ["-e", "display notification \"\(esc)\" with title \"Red Light\""]
     try? p.run()
 }
 
@@ -445,7 +445,7 @@ func learn(cfg: Config, learned: Learned, state: inout State, now: Date) -> Lear
     for n in notes { new.history.append("\(stamp.string(from: now)): \(n)"); log("learned: \(n)") }
     if new.history.count > 40 { new.history.removeFirst(new.history.count - 40) }
     if state.lastNotified.map({ now.timeIntervalSince($0) > 86400 }) ?? true {
-        notify("Adjusted: " + notes.joined(separator: "; ") + ". Undo with 'midnight forget'.")
+        notify("Adjusted: " + notes.joined(separator: "; ") + ". Undo with 'redlight forget'.")
         state.lastNotified = now
     }
     return new
@@ -559,13 +559,13 @@ case "night", "day":
     st?.pausedUntil = nil
     saveState(startTransition(to: cmd, cfg: cfg, learned: learned, state: st, now: now, fade: 0))
 case "pause":
-    // midnight pause <minutes> | sunrise
+    // redlight pause <minutes> | sunrise
     var st = loadState() ?? State(mode: "unset", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil)
     let arg = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "60"
     let until: Date
     if arg == "sunrise" { until = nextSunrise(cfg: cfg, learned: learned, now: now) ?? now.addingTimeInterval(8 * 3600) }
     else if let m = Double(arg), m > 0 { until = now.addingTimeInterval(m * 60) }
-    else { print("usage: midnight pause <minutes>|sunrise"); exit(2) }
+    else { print("usage: redlight pause <minutes>|sunrise"); exit(2) }
     if st.mode == "night" { st = startTransition(to: "day", cfg: cfg, learned: learned, state: st, now: now, fade: 0) }
     st.pausedUntil = until
     saveState(st); log("paused until \(fmt.string(from: until))"); print("paused until \(fmt.string(from: until))")
@@ -576,9 +576,9 @@ case "resume":
     if st.mode != want { st = startTransition(to: want, cfg: cfg, learned: learned, state: st, now: now, fade: 0) }
     saveState(st); log("resumed"); print("resumed (\(want))")
 case "location":
-    // midnight location <lat> <lon> [auto|manual]
+    // redlight location <lat> <lon> [auto|manual]
     guard CommandLine.arguments.count > 3, let la = Double(CommandLine.arguments[2]), let lo = Double(CommandLine.arguments[3]),
-          abs(la) <= 90, abs(lo) <= 180 else { print("usage: midnight location <lat> <lon> [auto|manual]"); exit(2) }
+          abs(la) <= 90, abs(lo) <= 180 else { print("usage: redlight location <lat> <lon> [auto|manual]"); exit(2) }
     var c = cfg
     let source = CommandLine.arguments.count > 4 ? CommandLine.arguments[4] : "manual"
     if source == "auto" && c.locationSource == "manual" { print("location is set manually; not overriding"); exit(0) }
@@ -588,7 +588,7 @@ case "location":
     if moved { log(String(format: "location updated to %.3f, %.3f (%@)", la, lo, source)) }
     print(String(format: "location %.3f, %.3f (%@)", la, lo, source))
 case "set":
-    guard CommandLine.arguments.count > 3 else { print("usage: midnight set warmth|keyboard|idle|shade|tint <value|off>"); exit(2) }
+    guard CommandLine.arguments.count > 3 else { print("usage: redlight set warmth|keyboard|idle|shade|tint <value|off>"); exit(2) }
     let field = CommandLine.arguments[2], raw = CommandLine.arguments[3]
     let off = (raw == "off")
     guard off || Double(raw) != nil else { print("'\(raw)' is not a number or 'off'"); exit(2) }
@@ -622,7 +622,7 @@ case "preset":
         if s.keyboardBrightness != nil { s.keyboardAutoBrightness = false }
         apply(s, label: "PRESET \(p.name)")
     case "save":
-        guard !name.isEmpty else { print("usage: midnight preset save <name> [sf-symbol]"); exit(2) }
+        guard !name.isEmpty else { print("usage: redlight preset save <name> [sf-symbol]"); exit(2) }
         var cur = readCurrent()
         cur.filterType = nil; cur.hue = nil; cur.keyboardAutoBrightness = nil; cur.filterEnabled = nil; cur.intensity = nil
         if cur.keyboardBrightness == nil { cur.keyboardBrightness = cfg.night.keyboardBrightness }
@@ -650,7 +650,7 @@ case "preset":
         presets.removeAll { $0.name.lowercased() == name.lowercased() }
         if c.nightPresetName?.lowercased() == name.lowercased() { c.nightPresetName = nil }
         c.presets = presets; saveConfig(c); print("deleted \(name)")
-    default: print("usage: midnight preset list|apply|save|night|delete <name>"); exit(2)
+    default: print("usage: redlight preset list|apply|save|night|delete <name>"); exit(2)
     }
 case "shade":
     var sh = loadShade()
@@ -663,7 +663,7 @@ case "shade":
     case "down": sh.level = max(0, (sh.level - 0.1).rounded(toPlaces: 2)); if sh.level == 0 { sh.enabled = false }
     default:
         if let pct = Double(arg) { sh.level = max(0, min(0.9, pct / 100)); sh.enabled = sh.level > 0 }
-        else { print("usage: midnight shade on|off|toggle|up|down|<0-100>"); exit(2) }
+        else { print("usage: redlight shade on|off|toggle|up|down|<0-100>"); exit(2) }
     }
     saveShade(sh)
     print("shade \(sh.enabled ? "on" : "off") \(Int((sh.level * 100).rounded()))%")
@@ -705,5 +705,5 @@ case "forget":
 case "curve":
     for w in stride(from: 0.0, through: 1.0, by: 0.1) { let c = warmthCurve(w); print(String(format: "warmth %3.0f%%  blue %.2f  green %.2f  tint %.2f", w * 100, c.blue, c.green, c.tint)) }
 default:
-    print("usage: midnight check|night|day|pause|resume|location|set|preset|shade|reapply|status|suntimes|learned|forget"); exit(2)
+    print("usage: redlight check|night|day|pause|resume|location|set|preset|shade|reapply|status|suntimes|learned|forget"); exit(2)
 }
