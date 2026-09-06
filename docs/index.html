@@ -15,16 +15,13 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='36' r='16' fill='%23f0a33a'/%3E%3Crect x='0' y='36' width='64' height='28' fill='%230d0e11'/%3E%3C/svg%3E">
 <style>
   :root{
-    --t:0;                                   /* 0 = full Nightfall red, 1 = neutral dark; set by scroll */
-    --red:#c8200f; --red2:#6d0c07; --cream:#fff2e3;
-    --bg:var(--red);
     --void:#0d0e11; --canvas:#111318; --edge:rgba(255,255,255,.08); --snow:#ffffff; --mist:#9aa0ab; --ash:#6b7280;
     --amber:#f0a33a; --amber2:#ffbf5c; --ink:#1a1108;
     --sora:Sora,Inter,ui-sans-serif,system-ui,sans-serif; --inter:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
-  body{margin:0;background:var(--bg);color:var(--snow);font-family:var(--inter);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  body{margin:0;background:var(--void);color:var(--snow);font-family:var(--inter);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
   a{color:inherit;text-decoration:none}
   .wrap{max-width:1140px;margin:0 auto;padding:0 24px}
   h1,h2,h3{font-family:var(--sora);letter-spacing:-.02em;margin:0}
@@ -40,7 +37,7 @@
   .btn.sm{height:36px;padding:0 16px;font-size:12px}
   .btn svg{width:15px;height:15px}
   /* nav */
-  nav{position:fixed;inset-inline:0;top:0;z-index:50;background:var(--navbg,rgba(80,10,6,.35));backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,.1)}
+  nav{position:fixed;inset-inline:0;top:0;z-index:50;background:var(--navbg,transparent);backdrop-filter:blur(16px);border-bottom:1px solid var(--navline,transparent)}
   nav .wrap{height:64px;display:flex;align-items:center;justify-content:space-between;gap:20px}
   .brand{display:flex;align-items:center;gap:9px;font-family:var(--sora);font-weight:700;font-size:19px}
   .brand svg{width:24px;height:24px}
@@ -48,27 +45,51 @@
   nav ul a:hover{color:#fff}
   nav .right{display:flex;gap:10px;align-items:center}
   /* hero */
-  .hero{padding:150px 0 40px;position:relative;overflow:hidden;min-height:100vh;
-    background:linear-gradient(180deg,rgba(0,0,0,0) 0%,rgba(0,0,0,.28) 100%)}
-  .hero .sky{position:absolute;inset:0;pointer-events:none;
-    background:radial-gradient(1400px 700px at 50% 120%,rgba(255,214,150,calc(.55*var(--t))),rgba(255,140,60,calc(.25*var(--t))) 35%,transparent 70%)}
-  .hero .sun{position:absolute;left:50%;width:min(64vw,720px);aspect-ratio:1;border-radius:50%;pointer-events:none;
-    bottom:calc(-58% + var(--t)*44%);transform:translateX(-50%);opacity:calc(.35 + .65*var(--t));
-    background:radial-gradient(circle at 50% 42%,#fff2cf 0%,#ffcb6b 22%,#ff8f3c 48%,rgba(255,80,30,.55) 68%,rgba(255,60,20,0) 74%);
-    filter:blur(calc(6px + 18px*(1 - var(--t))));mix-blend-mode:screen}
-  .hero .grain{position:absolute;inset:0;pointer-events:none;opacity:.07;mix-blend-mode:overlay;
+  /* The red field: a full-viewport light with no blue in it (every colour below has B = 0), like a therapy panel.
+     It sits above the page and opens from the centre as you scroll, an iris, revealing the product page beneath. */
+  .redfield{position:fixed;inset:0;z-index:40;overflow:hidden;
+    background:
+      radial-gradient(90vmax 70vmax at 50% 55%, rgb(214,34,0) 0%, rgb(168,20,0) 32%, rgb(112,10,0) 62%, rgb(66,4,0) 100%);
+    -webkit-mask:radial-gradient(circle at 50% 50%, transparent var(--hole,0px), #000 calc(var(--hole,0px) + 1px));
+            mask:radial-gradient(circle at 50% 50%, transparent var(--hole,0px), #000 calc(var(--hole,0px) + 1px))}
+  .redfield .leds{position:absolute;inset:-40px;
+    background-image:radial-gradient(circle, rgba(255,72,0,.95) 0 1.4px, rgba(255,72,0,0) 3px);
+    background-size:26px 26px;opacity:.55;
+    -webkit-mask:radial-gradient(70vmax 60vmax at 50% 55%, #000 0%, rgba(0,0,0,.5) 45%, transparent 80%);
+            mask:radial-gradient(70vmax 60vmax at 50% 55%, #000 0%, rgba(0,0,0,.5) 45%, transparent 80%);
+    animation:breathe 5.5s ease-in-out infinite}
+  .redfield .core{position:absolute;left:50%;top:55%;width:72vmax;height:72vmax;transform:translate(-50%,-50%);border-radius:50%;
+    background:radial-gradient(circle, rgba(255,96,0,.55) 0%, rgba(255,48,0,.28) 30%, rgba(255,24,0,0) 68%);
+    filter:blur(30px);animation:breathe 5.5s ease-in-out infinite reverse}
+  @keyframes breathe{0%,100%{opacity:.55}50%{opacity:.85}}
+  .redfield .grain{position:absolute;inset:0;opacity:.09;mix-blend-mode:overlay;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+  .redfield .inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+    opacity:var(--textop,1);transform:scale(calc(1 + .06*var(--p,0)));transition:none}
+  .redfield .eyebrow{font-size:12px;letter-spacing:.22em;text-transform:uppercase;font-weight:600;color:rgb(255,120,0);margin-bottom:22px}
+  /* every colour here has a blue channel of exactly zero, type included */
+  .redfield .mark{font-family:var(--sora);font-weight:700;letter-spacing:-.04em;line-height:.9;font-size:clamp(84px,16vw,200px);
+    background:linear-gradient(180deg, rgb(255,236,120) 0%, rgb(255,196,0) 55%, rgb(255,140,0) 100%);-webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 0 40px rgba(255,90,0,.5))}
+  .redfield .line{font-family:var(--sora);font-weight:500;font-size:clamp(20px,2.6vw,30px);color:rgb(255,186,0);margin-top:18px;letter-spacing:-.01em}
+  .redfield .cue{position:absolute;bottom:34px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:10px;
+    font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:rgb(255,150,0);opacity:var(--textop,1)}
+  .redfield .cue i{width:26px;height:26px;border-radius:50%;border:1.5px solid rgb(255,150,0);display:block;position:relative;animation:pulse 2.2s ease-in-out infinite}
+  .redfield .cue i:after{content:"";position:absolute;inset:8px;border-radius:50%;background:rgb(255,150,0)}
+  @keyframes pulse{0%,100%{transform:scale(1);opacity:.9}50%{transform:scale(1.18);opacity:.5}}
+  /* the bright rim of the opening */
+  .rim{position:fixed;left:50%;top:50%;width:calc(var(--hole,0px)*2);height:calc(var(--hole,0px)*2);transform:translate(-50%,-50%);border-radius:50%;
+    z-index:41;pointer-events:none;opacity:var(--rimop,0);
+    box-shadow:0 0 0 1.5px rgba(255,200,0,.9),0 0 50px 8px rgba(255,90,0,.7),inset 0 0 60px rgba(255,120,0,.35)}
+  /* the page hero, pinned while the iris opens */
+  .reveal{position:relative;height:calc(var(--pinh,100vh) + var(--budget,110vh))}
+  .hero{position:sticky;top:0;padding:120px 0 40px;overflow:hidden;background:var(--void)}
   .hero .wrap{position:relative}
-  .hero .kick{display:inline-flex;align-items:center;gap:10px;font-size:12px;letter-spacing:.16em;text-transform:uppercase;font-weight:600;color:var(--cream);opacity:.85;margin-bottom:22px}
-  .hero .kick i{width:8px;height:8px;border-radius:50%;background:#ffcb6b;box-shadow:0 0 14px #ffb347;display:inline-block}
-  .hero .scroll{position:absolute;left:50%;bottom:26px;transform:translateX(-50%);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,242,227,.7);display:flex;flex-direction:column;align-items:center;gap:8px;opacity:calc(1 - var(--t)*2)}
-  .hero .scroll span{width:1px;height:38px;background:linear-gradient(180deg,rgba(255,242,227,.8),transparent);display:block}
   .hero h1{font-size:clamp(56px,8.6vw,96px);font-weight:600;line-height:1.02;max-width:900px}
-  .hero h1 .grad{background:linear-gradient(90deg,#fff6ea 0%,#ffd39a 55%,#ffb04a 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
-  .hero .sub{font-size:clamp(17px,2vw,21px);color:var(--cream);opacity:.88;max-width:640px;margin:26px 0 34px;line-height:1.5}
+  .hero h1 .grad{background:linear-gradient(90deg,#fff 0%,#ffd39a 55%,#f0a33a 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero .sub{font-size:clamp(17px,2vw,21px);color:var(--mist);max-width:640px;margin:26px 0 34px;line-height:1.5}
   .hero .ctas{display:flex;gap:12px;flex-wrap:wrap}
-  .hero .fine{font-size:12.5px;color:var(--cream);opacity:.6;margin-top:18px}
-  .hero .btn.line{border-color:rgba(255,242,227,.4)}
+  .hero .fine{font-size:12.5px;color:var(--ash);margin-top:18px}
   /* product shot */
   .shot{position:relative;margin:56px auto 0;max-width:1080px;border-radius:18px;overflow:hidden;border:1px solid rgba(255,255,255,.12);filter:url(#hero);
     box-shadow:0 40px 120px rgba(0,0,0,.65),0 0 0 1px rgba(0,0,0,.6);aspect-ratio:16/9.4;
@@ -190,6 +211,7 @@
   footer .desc{max-width:340px;line-height:1.55}
   footer .base{display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:44px;padding-top:24px;border-top:1px solid var(--edge);font-size:12.5px;color:var(--ash)}
   footer .word{font-family:var(--sora);font-weight:700;font-size:clamp(60px,12vw,150px);letter-spacing:-.04em;line-height:.9;color:rgba(255,255,255,.04);margin-top:40px;text-align:center;user-select:none}
+  @media (prefers-reduced-motion:reduce){.redfield,.rim{display:none}.reveal{height:auto}.hero{position:relative}}
   @media (max-width:900px){
     nav ul,nav .line{display:none}
     .cards,.bullets,.two,.sci,.demo,.price{grid-template-columns:1fr}
@@ -217,10 +239,20 @@
   </div>
 </div></nav>
 
+<div class="redfield" id="rf" aria-hidden="true">
+  <div class="core"></div><div class="leds"></div><div class="grain"></div>
+  <div class="inner">
+    <div class="eyebrow">Zero blue light</div>
+    <div class="mark">Nightfall</div>
+    <div class="line">Red light after dark, for Mac.</div>
+  </div>
+  <div class="cue"><i></i>Scroll</div>
+</div>
+<div class="rim" id="rim" aria-hidden="true"></div>
+
+<div class="reveal" id="reveal">
 <header class="hero" id="product">
-  <div class="sky"></div><div class="sun"></div><div class="grain"></div>
   <div class="wrap">
-    <div class="kick"><i></i>This is your screen at Warmth 100%</div>
     <h1>Zero blue.<br><span class="grad">After dark.</span></h1>
     <p class="sub">Nightfall takes the blue light out of your Mac at sunset and gives it back at sunrise. Not warmer. Gone. The keyboard too, dimmer than the system will let you go.</p>
     <div class="ctas">
@@ -241,11 +273,11 @@
         </div>
       </div>
       <div class="panel"><img src="img/panel.png" alt="" width="303"></div>
-      <div class="caption"><b id="shotcap">Nightfall, 100%. Scroll for sunrise.</b>The real panel, not a mockup. One slider for blue light. One for the keyboard. Presets for the kind of night it is. It lives in the menu bar and looks like it shipped with the Mac.<span class="k">Screenshot from the app</span></div>
+      <div class="caption"><b>The real panel. Not a mockup.</b>The real panel, not a mockup. One slider for blue light. One for the keyboard. Presets for the kind of night it is. It lives in the menu bar and looks like it shipped with the Mac.<span class="k">Screenshot from the app</span></div>
     </div>
   </div>
-  <div class="scroll"><span></span>Scroll for sunrise</div>
 </header>
+</div>
 
 <section id="features"><div class="wrap">
   <h2>Warmth. Keyboard. Learning.</h2>
@@ -399,31 +431,39 @@
 </div></footer>
 
 <script>
-  // Scroll is sunrise. t runs 0 → 1 across the hero: the sky drains from full red to neutral dark, the sun rises to
-  // the horizon line, and the product shot — rendered as a screen at Warmth 100 % — gets its blue back.
+  // The iris. While the page hero is pinned, scrolling opens a circle through the red field from the centre of the
+  // viewport. Inside the opening, the product shot is still warm at first and loses its warmth as the circle grows,
+  // so the first thing you see through the hole is a screen with no blue in it, and the last is the page as it is.
   (function(){
-    var root=document.documentElement, hero=document.querySelector('.hero'), hm=document.getElementById('hm'), cap=document.getElementById('shotcap');
-    var red=[200,32,15], deep=[109,12,7], vd=[13,14,17];
-    function mix(a,b,t){return a.map(function(x,i){return Math.round(x+(b[i]-x)*t)})}
-    function ease(t){return t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2}
+    var root=document.documentElement, rf=document.getElementById('rf'), rim=document.getElementById('rim'), hm=document.getElementById('hm');
+    var hero=document.querySelector('.hero');
+    if(!rf||window.matchMedia('(prefers-reduced-motion: reduce)').matches){ if(hm) hm.setAttribute('values','1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0'); return; }
+    var BUDGET=function(){return Math.round(window.innerHeight*1.1)};
+    function ease(t){return t*t*(3-2*t)}                 // smoothstep: opens gently, then commits
     function matrixFor(w){ w=Math.max(0,Math.min(1,w)); var b,g,tint; if(w<=0.6){var q=w/0.6;b=1-q;g=1-0.40*q;tint=0;}else{var u=(w-0.6)/0.4;b=0;g=0.60-0.25*u;tint=0.50*u;}
       var r0=[(1-tint)+tint*0.2126, tint*0.7152*g, tint*0.0722*b], r1=[0,(1-tint)*g,0], r2=[0,0,(1-tint)*b];
       return [r0[0],r0[1],r0[2],0,0, r1[0],r1[1],r1[2],0,0, r2[0],r2[1],r2[2],0,0, 0,0,0,1,0].map(function(x){return +x.toFixed(4)}).join(' ');}
+    function layout(){ root.style.setProperty('--pinh', hero.offsetHeight+'px'); root.style.setProperty('--budget', BUDGET()+'px'); }
     var ticking=false;
     function update(){
       ticking=false;
-      var span=Math.max(300,hero.offsetHeight*0.85);
-      var raw=Math.max(0,Math.min(1,window.scrollY/span)), t=ease(raw);
-      root.style.setProperty('--t',t.toFixed(4));
-      // sky: red → deep red → void, with the shift weighted toward the end so the top of the page stays fully red
-      var c = t<0.55 ? mix(red,deep,t/0.55) : mix(deep,vd,(t-0.55)/0.45);
-      root.style.setProperty('--bg','rgb('+c.join(',')+')');
-      root.style.setProperty('--navbg', t<0.5 ? 'rgba(90,10,6,'+(0.35+0.3*t)+')' : 'rgba(13,14,17,'+(0.4+0.4*(t-0.5)/0.5)+')');
-      hm.setAttribute('values',matrixFor(1-t));
-      if(cap){ var w=Math.round((1-t)*100); cap.textContent = w>90?'Nightfall, 100%. Scroll for sunrise.': w>5?'Sunrise in progress · Warmth '+w+'%':'Sunrise. Warmth off, blue restored.'; }
+      var budget=BUDGET(), raw=Math.max(0,Math.min(1,window.scrollY/budget)), p=ease(raw);
+      var maxR=Math.hypot(window.innerWidth,window.innerHeight)/2+40;          // enough to clear the corners
+      var r=p*maxR;
+      root.style.setProperty('--p',p.toFixed(4));
+      root.style.setProperty('--hole',r.toFixed(1)+'px');
+      root.style.setProperty('--textop',Math.max(0,1-raw/0.18).toFixed(3));   // the wordmark gives way as the iris opens
+      root.style.setProperty('--rimop',(raw<=0?0:Math.max(0,1-Math.pow(raw,1.6))).toFixed(3));
+      var done=raw>=1;
+      rf.style.visibility=done?'hidden':'visible'; rim.style.visibility=done?'hidden':'visible';
+      root.style.setProperty('--navbg', done? 'rgba(13,14,17,.72)' : 'rgba(0,0,0,'+(0.28*p).toFixed(3)+')');
+      root.style.setProperty('--navline', done? 'rgba(255,255,255,.08)' : 'transparent');
+      hm.setAttribute('values',matrixFor(1-p));
     }
     window.addEventListener('scroll',function(){ if(!ticking){ ticking=true; requestAnimationFrame(update);} },{passive:true});
-    window.addEventListener('resize',update); update();
+    window.addEventListener('resize',function(){layout();update();});
+    layout(); update();
+    window.addEventListener('load',function(){layout();update();});
   })();
   function curve(w){ w=Math.max(0,Math.min(1,w)); if(w<=0.6){var t=w/0.6;return {b:1-t,g:1-0.40*t,tint:0};} var u=(w-0.6)/0.4; return {b:0,g:0.60-0.25*u,tint:0.50*u}; }
   var wm=document.getElementById('wm'),pct=document.getElementById('pct'),rb=document.getElementById('rb'),rg=document.getElementById('rg'),rt=document.getElementById('rt'),stage=document.getElementById('stage'),slider=document.getElementById('slider');
