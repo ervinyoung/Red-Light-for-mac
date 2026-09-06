@@ -396,10 +396,11 @@ extension Double { func rounded(toPlaces p: Int) -> Double { let m = pow(10.0, D
 // MARK: - Control Center design language (measured from the Battery panel at 2x)
 enum CC {
     static let side: CGFloat = 12
-    static let title = Font.system(size: 15, weight: .bold)
+    static let title = Font.system(size: 13, weight: .semibold)
     static let value = Font.system(size: 15, weight: .semibold)
     static let row = Font.system(size: 15)
     static let small = Font.system(size: 13)
+    static let subtitle = Font.system(size: 11)
     static let header = Font.system(size: 13, weight: .semibold)
     static let sep = Color.primary.opacity(0.10)
     static let circle = Color.primary.opacity(0.12)
@@ -425,7 +426,7 @@ struct TitleBlock<Trailing: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack { Text(title).font(CC.title); Spacer(); trailing() }.frame(height: 32).padding(.top, 5)
-            HStack { Text(subtitle).font(CC.small).foregroundStyle(.secondary); Spacer() }.frame(height: 17)
+            HStack { Text(subtitle).font(CC.subtitle).foregroundStyle(.secondary); Spacer() }.frame(height: 17)
             Line().padding(.top, 4.5)
         }
     }
@@ -521,7 +522,7 @@ struct TextRow: View {
 }
 struct SettingsRow: View {
     let text: String
-    var body: some View { HStack { Text(text).font(CC.small); Spacer() }.frame(height: 34).padding(.bottom, -2).contentShape(Rectangle()) }
+    var body: some View { HStack { Text(text).font(CC.small); Spacer() }.frame(height: 34).padding(.bottom, 5).contentShape(Rectangle()) }
 }
 /// The system switch, or — only while exporting a documentation image — an identical drawing of it.
 struct SwitchView: View {
