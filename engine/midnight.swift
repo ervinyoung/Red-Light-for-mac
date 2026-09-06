@@ -212,7 +212,7 @@ func describe(_ s: Settings) -> String {
     if let v = s.warmth { p.append(String(format: "warmth=%.2f", v)) }
     if let v = s.filterEnabled { p.append("filter=\(v ? "on" : "off")") }
     if let v = s.intensity { p.append(String(format: "tint=%.2f", v)) }
-    if let v = s.keyboardBrightness { p.append(String(format: "kbBrightness=%.3f", v)) }
+    if let v = s.keyboardBrightness { p.append(String(format: "kbBrightness=%.4f", v)) }
     if let v = s.keyboardIdleDimSeconds { p.append("kbIdleDim=\(Int(v))s") }
     if let v = s.keyboardAutoBrightness { p.append("kbAuto=\(v)") }
     if let v = s.shadeEnabled { p.append("shade=\(v ? "on" : "off")") }
