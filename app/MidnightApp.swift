@@ -367,6 +367,11 @@ final class Model: ObservableObject {
         }
         if let v = l.keyboardBrightness { lastKeyboard = v } else { l.keyboardBrightness = lastKeyboard ?? live.keyboardBrightness }
         live = l
+        if ProcessInfo.processInfo.environment["MIDNIGHT_DEBUG"] != nil {
+            let line = "\(Date()) live warmth=\(l.warmth ?? -1) kb=\(l.keyboardBrightness ?? -1) idle=\(l.keyboardIdleDimSeconds ?? -1) shade=\(shade.enabled)/\(shade.level) | status: \(line)\n"
+            if let h = try? FileHandle(forWritingTo: appDir.appendingPathComponent("debug-live.log")) { h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); h.closeFile() }
+            else { try? line.write(to: appDir.appendingPathComponent("debug-live.log"), atomically: true, encoding: .utf8) }
+        }
     }
     func set(_ field: String, _ value: String, final: Bool = true) {
         switch field {
@@ -449,9 +454,12 @@ struct IconRow: View {
 struct GlassSlider: View {
     let minIcon: String; let maxIcon: String; let steps: [Step]; let current: Double?; let isOn: Bool
     let onChange: (Step, Bool) -> Void
-    @State private var idx: Double = 0
-    @State private var dragging = false
+    // The thumb is *derived* from `current` on every render. Only while the user is actually moving it does a
+    // local override take over, and that override can never get stuck: it ends on AppKit's editing callback, or
+    // half a second after the last movement, whichever comes first.
+    @State private var dragIdx: Double? = nil
     @State private var lastSent = -1
+    @State private var settle: DispatchWorkItem? = nil
     private var offIndex: Double { Double(steps.firstIndex { $0.value == nil } ?? 0) }
     private var useLog: Bool {
         let v = steps.compactMap { $0.value }.filter { $0 > 0 }
@@ -473,24 +481,31 @@ struct GlassSlider: View {
         }
         return last.0
     }
+    private func finish() {
+        settle?.cancel(); settle = nil
+        guard let v = dragIdx else { return }
+        let i = Int(v.rounded())
+        dragIdx = nil; lastSent = -1
+        onChange(steps[i], true)
+    }
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: minIcon).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 18)
-            Slider(value: $idx, in: 0...Double(max(1, steps.count - 1))) { editing in
-                dragging = editing
-                if !editing { let i = Int(idx.rounded()); idx = Double(i); lastSent = -1; onChange(steps[i], true) }
-            }
-            .controlSize(.large)
-            .onChange(of: idx) { v in
-                guard dragging else { return }
+        let position = Binding<Double>(
+            get: { dragIdx ?? truePosition },
+            set: { v in
+                dragIdx = v
                 let i = Int(v.rounded())
                 if i != lastSent { lastSent = i; onChange(steps[i], false) }
-            }
+                settle?.cancel()
+                let w = DispatchWorkItem { finish() }
+                settle = w
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: w)
+            })
+        HStack(spacing: 10) {
+            Image(systemName: minIcon).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 18)
+            Slider(value: position, in: 0...Double(max(1, steps.count - 1))) { editing in if !editing { finish() } }
+                .controlSize(.large)
             Image(systemName: maxIcon).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 18)
         }
-        .onAppear { idx = truePosition }
-        .onChange(of: current) { _ in if !dragging { idx = truePosition } }
-        .onChange(of: isOn) { _ in if !dragging { idx = truePosition } }
     }
 }
 struct SliderRow: View {

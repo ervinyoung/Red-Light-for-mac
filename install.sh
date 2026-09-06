@@ -21,10 +21,10 @@ if [ ! -f "$DIR/config.json" ]; then
   "learning": { "enabled": true, "minNights": 3, "lookbackDays": 14, "maxOffsetMinutes": 120 },
   "nightPresetName": "Night",
   "presets": [
-    { "name": "Dusk",       "icon": "sunset.fill",   "settings": { "warmth": 0.45, "keyboardBrightness": 0.02,  "keyboardIdleDimSeconds": 30, "shadeEnabled": false, "shadeLevel": 0.2 } },
+    { "name": "Dusk",       "icon": "sunset.fill",   "settings": { "warmth": 0.45, "keyboardBrightness": 0.01,  "keyboardIdleDimSeconds": 30, "shadeEnabled": false, "shadeLevel": 0.2 } },
     { "name": "Night",      "icon": "moon.fill",     "settings": { "warmth": 0.8,  "keyboardBrightness": 0.003, "keyboardIdleDimSeconds": 5,  "shadeEnabled": false, "shadeLevel": 0.2 } },
     { "name": "Deep night", "icon": "moon.zzz.fill", "settings": { "warmth": 1.0,  "keyboardBrightness": 0.001, "keyboardIdleDimSeconds": 5,  "shadeEnabled": true,  "shadeLevel": 0.4 } },
-    { "name": "Movie",      "icon": "film.fill",     "settings": { "warmth": 0.5,  "keyboardBrightness": 0.0,   "keyboardIdleDimSeconds": 5,  "shadeEnabled": true,  "shadeLevel": 0.3 } }
+    { "name": "Movie",      "icon": "film.fill",     "settings": { "warmth": 0.45, "keyboardBrightness": 0.0,   "keyboardIdleDimSeconds": 5,  "shadeEnabled": true,  "shadeLevel": 0.4 } }
   ],
   "shortcuts": {
     "toggleShade": { "keyCode": 1,   "modifiers": ["control", "option", "command"] },
