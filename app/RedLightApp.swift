@@ -396,14 +396,20 @@ extension Double { func rounded(toPlaces p: Int) -> Double { let m = pow(10.0, D
 // MARK: - Control Center design language (measured from the Battery panel at 2x)
 enum CC {
     static let side: CGFloat = 12
-    static let title = Font.system(size: 13, weight: .semibold)
-    static let value = Font.system(size: 15, weight: .semibold)
-    static let row = Font.system(size: 15)
-    static let small = Font.system(size: 13)
-    static let subtitle = Font.system(size: 11)
-    static let header = Font.system(size: 13, weight: .semibold)
-    static let sep = Color.primary.opacity(0.10)
-    static let circle = Color.primary.opacity(0.12)
+    // macOS text styles, verbatim: .headline is 13 pt bold, .body 13 pt regular, .subheadline 11 pt regular.
+    // A Control Center section header ("Output", "Energy Mode") is the subheadline size in semibold secondary.
+    static let title    = Font.system(size: 13, weight: .bold)      // .headline
+    static let row      = Font.system(size: 13)                     // .body
+    static let small    = Font.system(size: 13)                     // .body
+    static let subtitle = Font.system(size: 11)                     // .subheadline
+    static let header   = Font.system(size: 11, weight: .semibold)  // section header
+    static let value    = Font.system(size: 11, weight: .semibold)  // its right-hand value, same treatment
+    // System colours, not opacities of our own choosing. labelColor is 84.7 % black, never pure black.
+    static let label     = Color(nsColor: .labelColor)
+    static let secondary = Color(nsColor: .secondaryLabelColor)
+    static let sep       = Color(nsColor: .separatorColor)
+    static let circle    = Color(nsColor: .quaternaryLabelColor)
+    static let symbol    = Color(nsColor: .labelColor)
 }
 struct Step: Identifiable { let label: String; let value: Double?; var id: String { label } }
 // Denser above the 60 % knee, where blue is already gone and each step is a different feel of red.
@@ -425,8 +431,8 @@ struct TitleBlock<Trailing: View>: View {
     let title: String; let subtitle: String; @ViewBuilder let trailing: () -> Trailing
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack { Text(title).font(CC.title); Spacer(); trailing() }.frame(height: 32).padding(.top, 5)
-            HStack { Text(subtitle).font(CC.subtitle).foregroundStyle(.secondary); Spacer() }.frame(height: 17)
+            HStack { Text(title).font(CC.title).foregroundStyle(CC.label); Spacer(); trailing() }.frame(height: 32).padding(.top, 5)
+            HStack { Text(subtitle).font(CC.subtitle).foregroundStyle(CC.secondary); Spacer() }.frame(height: 17)
             Line().padding(.top, 4.5)
         }
     }
@@ -434,7 +440,7 @@ struct TitleBlock<Trailing: View>: View {
 struct Header: View {
     let text: String; var value: String? = nil
     var body: some View {
-        HStack { Text(text).font(CC.header).foregroundStyle(.secondary); Spacer(); if let v = value { Text(v).font(CC.value).foregroundStyle(.secondary) } }
+        HStack { Text(text).font(CC.header).foregroundStyle(CC.secondary); Spacer(); if let v = value { Text(v).font(CC.value).foregroundStyle(CC.secondary) } }
             .frame(height: 21).padding(.top, 8)
     }
 }
@@ -443,12 +449,15 @@ struct IconRow: View {
     var body: some View {
         HStack(spacing: 9) {
             ZStack {
-                Circle().fill(active ? Color.accentColor : CC.circle).frame(width: 26, height: 26)
-                Image(systemName: icon).font(.system(size: 13, weight: .medium)).foregroundStyle(active ? .white : .primary)
+                Circle().fill(active ? Color(nsColor: .controlAccentColor) : CC.circle).frame(width: 26, height: 26)
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .regular))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(active ? Color.white : CC.symbol)
             }
-            Text(label).font(CC.row)
+            Text(label).font(CC.row).foregroundStyle(CC.label)
             Spacer()
-            if let t = trailing { Text(t).font(CC.small).foregroundStyle(.secondary) }
+            if let t = trailing { Text(t).font(CC.small).foregroundStyle(CC.secondary) }
         }
         .frame(height: 32).contentShape(Rectangle())
     }
@@ -518,11 +527,21 @@ struct SliderRow: View {
 struct SectionEnd: View { var body: some View { Line().padding(.top, 5.5) } }
 struct TextRow: View {
     let text: String; var secondary = false
-    var body: some View { HStack { Text(text).font(CC.small).foregroundStyle(secondary ? .secondary : .primary); Spacer() }.frame(height: 33).contentShape(Rectangle()) }
+    var body: some View {
+        if secondary {
+            // explanatory line: .subheadline secondary, wrapping to as many lines as it needs
+            HStack(alignment: .top) {
+                Text(text).font(CC.subtitle).foregroundStyle(CC.secondary).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }.padding(.vertical, 5)
+        } else {
+            HStack { Text(text).font(CC.small).foregroundStyle(CC.label); Spacer() }.frame(height: 33).contentShape(Rectangle())
+        }
+    }
 }
 struct SettingsRow: View {
     let text: String
-    var body: some View { HStack { Text(text).font(CC.small); Spacer() }.frame(height: 34).padding(.bottom, 5).contentShape(Rectangle()) }
+    var body: some View { HStack { Text(text).font(CC.small).foregroundStyle(CC.label); Spacer() }.frame(height: 30).padding(.bottom, 8).contentShape(Rectangle()) }
 }
 /// The system switch, or — only while exporting a documentation image — an identical drawing of it.
 struct SwitchView: View {
@@ -557,7 +576,7 @@ struct PillButton: View {
 }
 struct ToggleRow: View {
     let label: String; let isOn: Binding<Bool>; var drawn = false
-    var body: some View { HStack { Text(label).font(CC.row); Spacer(); SwitchView(isOn: isOn, small: true, drawn: drawn) }.frame(height: 32) }
+    var body: some View { HStack { Text(label).font(CC.row).foregroundStyle(CC.label); Spacer(); SwitchView(isOn: isOn, small: true, drawn: drawn) }.frame(height: 32) }
 }
 
 // MARK: - Main panel
@@ -678,7 +697,7 @@ struct SettingsPage: View {
             Header(text: "Sun")
             ToggleRow(label: "Switch at Sunset and Sunrise", isOn: Binding(get: { m.agentRunning }, set: { m.setAgent($0) }), drawn: m.snapshotMode)
             HStack {
-                Text("Location").font(CC.row); Spacer()
+                Text("Location").font(CC.row).foregroundStyle(CC.label); Spacer()
                 Text(locationLabel).font(CC.small).foregroundStyle(.secondary)
             }.frame(height: 32)
             if m.locationDenied && m.config.locationSource != "manual" {
@@ -698,7 +717,7 @@ struct SettingsPage: View {
                 }.textFieldStyle(.roundedBorder).controlSize(.small).frame(height: 32)
             }
             HStack {
-                Text("Transition").font(CC.row); Spacer()
+                Text("Transition").font(CC.row).foregroundStyle(CC.label); Spacer()
                 Picker("", selection: Binding(get: { m.config.fadeMinutes ?? 30 }, set: { m.config.fadeMinutes = $0; m.saveConfig(reapply: false) })) {
                     ForEach(fades, id: \.1) { Text($0.0).tag($0.1) }
                 }.labelsHidden().controlSize(.small).frame(width: 96)
@@ -741,7 +760,7 @@ struct SettingsPage: View {
         switch m.config.locationSource { case "auto": return "\(c) · from this Mac"; case "manual": return "\(c) · manual"; default: return "\(c) · guessed from time zone" }
     }
     func shortcutRow(_ label: String, _ key: String, _ sc: Shortcut) -> some View {
-        HStack { Text(label).font(CC.row); Spacer()
+        HStack { Text(label).font(CC.row).foregroundStyle(CC.label); Spacer()
             PillButton(title: m.recording == key ? "Recording…" : describe(sc), drawn: m.snapshotMode) { m.recording == key ? m.stopRecording() : m.startRecording(key) }
         }.frame(height: 32)
     }
@@ -768,11 +787,12 @@ func snapshotIfRequested() {
     DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
         model.refresh()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            let host = NSHostingView(rootView: SnapshotRoot(m: model, page: page))
-            host.appearance = NSAppearance(named: .darkAqua)
+            let ap = NSAppearance(named: args.contains("light") ? .aqua : .darkAqua)
+            let host = NSHostingView(rootView: SnapshotRoot(m: model, page: page, light: args.contains("light")))
+            host.appearance = ap
             host.frame = NSRect(x: 0, y: 0, width: 303, height: 10)
             let win = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
-            win.appearance = NSAppearance(named: .darkAqua)
+            win.appearance = ap
             win.isOpaque = false; win.backgroundColor = .clear; win.contentView = host; win.orderFront(nil)
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                 let size = host.fittingSize
@@ -793,11 +813,12 @@ func snapshotIfRequested() {
     app.run()
 }
 struct SnapshotRoot: View {
-    @ObservedObject var m: Model; let page: String
+    @ObservedObject var m: Model; let page: String; var light = false
     var body: some View {
         Group { if page == "main" { Panel(m: m) } else { SettingsPage(m: m, back: {}) .frame(width: 303) } }
             .fixedSize(horizontal: false, vertical: true)
-            .background(Color(red: 0.13, green: 0.12, blue: 0.12))   // stands in for the system glass in the export
+            // stands in for the system glass in the export, at the tone each appearance shows through it
+            .background(light ? Color(white: 0.96) : Color(white: 0.13))
     }
 }
 
