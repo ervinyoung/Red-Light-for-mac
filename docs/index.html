@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nightfall — Warm light after dark, for Mac</title>
+<meta name="description" content="Nightfall takes the blue out of your Mac at sunset and puts it back at sunrise. Zero blue at 60%, a keyboard dimmer than the slider allows, and it learns your nights. Free and open source.">
+<meta property="og:title" content="Nightfall — Warm light after dark">
+<meta property="og:description" content="Take the blue out of your Mac at sunset. Zero blue at 60%. A keyboard dimmer than the slider allows. It learns your nights. Free, open, no account.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://ervinyoung.github.io/nightfall/">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='36' r='16' fill='%23e8a33c'/%3E%3Crect x='0' y='36' width='64' height='28' fill='%23120d0a'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#0c0907; --bg2:#15100c; --ink:#efe6d8; --ink2:#b9ab98; --dim:#7d7264;
+    --amber:#e8a33c; --ember:#c2532d; --line:rgba(239,230,216,.09);
+    --serif:"Cormorant Garamond",Georgia,"Times New Roman",serif;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:17px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 28px}
+  /* nav */
+  nav{position:sticky;top:0;z-index:10;backdrop-filter:blur(14px);background:rgba(12,9,7,.7);border-bottom:1px solid var(--line)}
+  nav .wrap{display:flex;align-items:center;justify-content:space-between;height:60px}
+  .brand{display:flex;align-items:center;gap:10px;font-family:var(--serif);font-size:24px;font-weight:600;letter-spacing:.01em;text-decoration:none}
+  .brand svg{width:26px;height:26px}
+  nav ul{list-style:none;display:flex;gap:26px;margin:0;padding:0;font-size:14px;color:var(--ink2)}
+  nav ul a{text-decoration:none}
+  nav ul a:hover{color:var(--ink)}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:999px;font-weight:600;font-size:15px;text-decoration:none;border:1px solid transparent;transition:transform .15s ease,background .15s ease}
+  .btn:hover{transform:translateY(-1px)}
+  .btn.primary{background:var(--amber);color:#1a1108}
+  .btn.primary:hover{background:#f0b254}
+  .btn.ghost{border-color:rgba(239,230,216,.22);color:var(--ink)}
+  .btn.ghost:hover{background:rgba(239,230,216,.06)}
+  .btn.small{padding:8px 14px;font-size:13px}
+  /* hero */
+  header.hero{position:relative;overflow:hidden;padding:96px 0 80px;border-bottom:1px solid var(--line)}
+  .horizon{position:absolute;inset:0;pointer-events:none;
+    background:
+      radial-gradient(1200px 520px at 50% 118%, rgba(232,163,60,.55), rgba(194,83,45,.28) 35%, rgba(12,9,7,0) 70%),
+      radial-gradient(900px 300px at 50% 108%, rgba(255,214,150,.35), rgba(12,9,7,0) 60%);}
+  .horizon:after{content:"";position:absolute;left:0;right:0;bottom:0;height:38%;background:linear-gradient(to top,var(--bg) 0%,rgba(12,9,7,.85) 45%,rgba(12,9,7,0) 100%)}
+  .hero .wrap{position:relative;text-align:center;max-width:860px}
+  .eyebrow{font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:var(--amber);font-weight:600}
+  h1{font-family:var(--serif);font-weight:500;font-size:clamp(64px,11vw,132px);line-height:.95;letter-spacing:-.01em;margin:18px 0 22px}
+  .lede{font-family:var(--serif);font-size:clamp(22px,2.6vw,30px);line-height:1.35;color:var(--ink);max-width:760px;margin:0 auto 34px;font-style:italic;font-weight:400}
+  .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+  .req{margin-top:18px;font-size:13px;color:var(--dim)}
+  /* sections */
+  section{padding:88px 0;border-bottom:1px solid var(--line)}
+  h2{font-family:var(--serif);font-weight:500;font-size:clamp(38px,5vw,56px);line-height:1.05;margin:0 0 22px;letter-spacing:-.005em}
+  .prose{font-family:var(--serif);font-size:clamp(20px,2.2vw,25px);line-height:1.45;color:var(--ink);max-width:780px}
+  .prose p{margin:0 0 1.1em}
+  .plain{font-size:16px;color:var(--ink2);max-width:680px}
+  .plain a{color:var(--amber);text-decoration:none;border-bottom:1px solid rgba(232,163,60,.4)}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;margin-top:44px}
+  .card{background:var(--bg2);border:1px solid var(--line);border-radius:18px;padding:28px}
+  .card .k{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--amber);font-weight:600;margin-bottom:12px}
+  .card h3{font-family:var(--serif);font-size:30px;font-weight:500;margin:0 0 12px;line-height:1.1}
+  .card p.v{font-family:var(--serif);font-size:19px;line-height:1.4;margin:0 0 14px}
+  .card p.d{font-size:14px;color:var(--ink2);margin:0;line-height:1.55}
+  /* demo */
+  .demo{display:grid;grid-template-columns:1.15fr .85fr;gap:36px;align-items:start;margin-top:40px}
+  .screen{border-radius:16px;overflow:hidden;border:1px solid rgba(239,230,216,.14);box-shadow:0 30px 80px rgba(0,0,0,.6);background:#f4f5f7;color:#1c1c1e;filter:url(#warmth)}
+  .screen .bar{display:flex;gap:7px;padding:10px 12px;background:#e7e7ea;border-bottom:1px solid #d4d4d8}
+  .screen .bar i{width:11px;height:11px;border-radius:50%;display:block}
+  .screen .body{padding:22px 24px;font-family:var(--sans);font-size:14px;line-height:1.5}
+  .screen h4{margin:0 0 6px;font-size:20px;color:#111}
+  .screen .row{display:flex;gap:10px;margin:14px 0;flex-wrap:wrap}
+  .chip{padding:6px 12px;border-radius:8px;font-weight:600;font-size:13px;color:#fff}
+  .screen .sky{height:70px;border-radius:10px;background:linear-gradient(90deg,#4aa3ff,#7cc4ff 45%,#ffd36b 70%,#ff8a5b);margin-top:8px}
+  .screen .txt{color:#3a3a3f;margin:10px 0 0}
+  .screen a{color:#0a66ff}
+  .controls{background:var(--bg2);border:1px solid var(--line);border-radius:18px;padding:26px}
+  .controls .hdr{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink2);font-weight:600}
+  .controls .hdr b{font-family:var(--serif);font-size:34px;color:var(--ink);letter-spacing:0;text-transform:none;font-weight:500}
+  input[type=range]{width:100%;margin:18px 0 8px;accent-color:var(--amber)}
+  .ticks{display:flex;justify-content:space-between;font-size:11px;color:var(--dim)}
+  .readout{margin-top:18px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .readout div{background:rgba(239,230,216,.05);border-radius:12px;padding:12px 12px}
+  .readout .l{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+  .readout .n{font-family:var(--serif);font-size:28px;line-height:1.1;margin-top:4px}
+  .stage{margin-top:16px;font-size:14px;color:var(--ink2);min-height:66px}
+  .presets{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+  .presets button{background:transparent;border:1px solid rgba(239,230,216,.2);color:var(--ink);border-radius:999px;padding:7px 12px;font-size:13px;cursor:pointer;font-family:var(--sans)}
+  .presets button:hover,.presets button.on{background:var(--amber);color:#1a1108;border-color:var(--amber)}
+  /* curve */
+  .curve{margin-top:34px;background:var(--bg2);border:1px solid var(--line);border-radius:18px;padding:22px}
+  .curve svg{width:100%;height:auto;display:block}
+  /* ritual */
+  .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:22px;margin-top:40px}
+  .step .t{font-family:var(--serif);font-size:44px;line-height:1;color:var(--amber);margin-bottom:10px}
+  .step h3{font-family:var(--serif);font-size:26px;font-weight:500;margin:0 0 8px}
+  .step p{font-size:14px;color:var(--ink2);margin:0}
+  /* numbers */
+  .nums{display:grid;grid-template-columns:repeat(5,1fr);gap:18px;margin-top:36px;text-align:center}
+  .nums .n{font-family:var(--serif);font-size:clamp(40px,5vw,64px);line-height:1;color:var(--amber);font-weight:500}
+  .nums .l{font-size:13px;color:var(--ink2);margin-top:8px}
+  /* pricing */
+  .price{display:grid;grid-template-columns:1fr 1fr;gap:36px;align-items:center;margin-top:30px}
+  .price .box{background:var(--bg2);border:1px solid var(--line);border-radius:22px;padding:34px;text-align:center}
+  .price .big{font-family:var(--serif);font-size:88px;line-height:1;font-weight:500}
+  .price ul{list-style:none;padding:0;margin:20px 0 26px;color:var(--ink2);font-size:15px;line-height:1.9}
+  /* faq */
+  details{border-top:1px solid var(--line);padding:18px 0}
+  details:last-of-type{border-bottom:1px solid var(--line)}
+  summary{cursor:pointer;font-family:var(--serif);font-size:24px;font-weight:500;list-style:none;display:flex;justify-content:space-between;align-items:center}
+  summary::-webkit-details-marker{display:none}
+  summary:after{content:"+";color:var(--amber);font-size:28px;font-weight:300}
+  details[open] summary:after{content:"–"}
+  details p{color:var(--ink2);font-size:16px;max-width:760px;margin:12px 0 0}
+  footer{padding:60px 0;color:var(--dim);font-size:14px}
+  footer .wrap{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
+  footer a{color:var(--ink2);text-decoration:none}
+  .fine{font-size:12px;color:var(--dim);margin-top:26px;max-width:760px;line-height:1.6}
+  @media (max-width:860px){
+    .grid3,.steps,.nums,.demo,.price{grid-template-columns:1fr}
+    nav ul{display:none}
+    header.hero{padding:70px 0 60px}
+    section{padding:64px 0}
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="warmth" color-interpolation-filters="sRGB"><feColorMatrix id="wm" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/></filter>
+</svg>
+
+<nav><div class="wrap">
+  <a class="brand" href="#"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="36" r="16" fill="#e8a33c"/><rect x="0" y="36" width="64" height="28" fill="#0c0907"/><rect x="6" y="36" width="52" height="2" fill="#e8a33c" opacity=".7"/></svg>Nightfall</a>
+  <ul><li><a href="#why">Why</a></li><li><a href="#how">How</a></li><li><a href="#demo">Try it</a></li><li><a href="#ritual">The ritual</a></li><li><a href="#faq">Questions</a></li></ul>
+  <a class="btn primary small" href="https://github.com/ervinyoung/nightfall#install">Get Nightfall</a>
+</div></nav>
+
+<header class="hero">
+  <div class="horizon"></div>
+  <div class="wrap">
+    <div class="eyebrow">For Mac · Free · Open source</div>
+    <h1>Nightfall</h1>
+    <p class="lede">The light went out of the day and another light came in, blue and cold and without mercy, and men sat before it into the small hours and wondered why they could not sleep.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/ervinyoung/nightfall#install">Get Nightfall for Mac</a>
+      <a class="btn ghost" href="https://github.com/ervinyoung/nightfall">Read the source</a>
+    </div>
+    <div class="req">Apple silicon · macOS 26 or later · No account · Nothing leaves your Mac</div>
+  </div>
+</header>
+
+<section id="why"><div class="wrap">
+  <h2>What the glass does to you</h2>
+  <div class="prose">
+    <p>There is a cell at the back of the eye that does not see. It has no part in seeing. It only tells the body what hour it is, and it answers to blue. It answered to the sky for as long as there have been eyes and now it answers to the glass, and the glass says noon at midnight, and the body believes it.</p>
+    <p>So the body holds the melatonin back. It waits for a dusk that does not come. And you lie there in the dark with the day still running in your blood.</p>
+  </div>
+  <p class="plain">The cell is a melanopsin-containing retinal ganglion cell, most sensitive near 480&nbsp;nm, squarely in the blue that screens emit. Evening exposure to that light measurably suppresses melatonin and delays the circadian clock. Warming the white point helps. Taking the blue out entirely helps more.</p>
+  <div class="grid3">
+    <div class="card"><div class="k">The problem with tints</div><h3>A veil over the glass</h3><p class="v">Lay a red film across everything and everything becomes the same red. You cannot read a map in it. You cannot tell the link from the word beside it.</p><p class="d">Apple's Color Tint filter maps every pixel to its brightness and mixes toward one hue. Nothing disappears, but hue collapses. Past 40% it is a blob.</p></div>
+    <div class="card"><div class="k">The problem with warmth</div><h3>A ceiling on warm</h3><p class="v">Night Shift turns the light gold and stops there, and the blue is still in it. It was only ever a warmer noon.</p><p class="d">White-point shifting scales the display's color channels. It keeps text crisp but never drives blue to zero, and it has nowhere to go past its own ceiling.</p></div>
+    <div class="card"><div class="k">What Nightfall does</div><h3>Both, each where it is right</h3><p class="v">First the blue is unmade at the source, until there is none. Then, and only then, a little red is folded in so that what was green does not fall to black.</p><p class="d">Channel scaling from 0 to 60% until blue is zero. Above 60%, a modest luminance-preserving tint recovers the green being removed. One slider.</p></div>
+  </div>
+</div></section>
+
+<section id="demo"><div class="wrap">
+  <h2>Drag it and watch the blue leave</h2>
+  <p class="plain">This is the same curve the app uses, applied to a mock window. Notice that the text stays readable the whole way, and that blue is gone at 60% before any tint arrives.</p>
+  <div class="demo">
+    <div class="screen" id="screen">
+      <div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+      <div class="body">
+        <h4>Sleep, week 14</h4>
+        <p class="txt">Deep sleep up eleven minutes on the nights the screen went red. Resting heart rate 51. <a href="#demo">Open the full report</a>.</p>
+        <div class="row"><span class="chip" style="background:#0a66ff">Blue</span><span class="chip" style="background:#1fa04a">Green</span><span class="chip" style="background:#d9342b">Red</span><span class="chip" style="background:#7a3ff2">Violet</span><span class="chip" style="background:#f0a300;color:#1a1108">Amber</span></div>
+        <div class="sky"></div>
+        <p class="txt">Twilight. The last of the light going off the water and the mountains standing black against it.</p>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="hdr"><span>Warmth</span><b id="pct">80%</b></div>
+      <input id="slider" type="range" min="0" max="100" step="1" value="80" aria-label="Warmth">
+      <div class="ticks"><span>Off</span><span>30</span><span>60 · no blue</span><span>100</span></div>
+      <div class="readout">
+        <div><div class="l">Blue</div><div class="n" id="rb">0%</div></div>
+        <div><div class="l">Green</div><div class="n" id="rg">47%</div></div>
+        <div><div class="l">Tint</div><div class="n" id="rt">25%</div></div>
+      </div>
+      <div class="stage" id="stage"></div>
+      <div class="presets" id="presets">
+        <button data-v="45">Dusk · 45</button><button data-v="60">No blue · 60</button><button data-v="80" class="on">Night · 80</button><button data-v="100">Deep · 100</button>
+      </div>
+    </div>
+  </div>
+  <div class="curve">
+    <svg viewBox="0 0 800 260" role="img" aria-label="Warmth curve: blue falls to zero at 60 percent, green eases down, tint rises after 60 percent">
+      <defs><linearGradient id="gk" x1="0" x2="1"><stop offset="0" stop-color="#0c0907"/><stop offset=".6" stop-color="#3a1d0f"/><stop offset="1" stop-color="#5b1e12"/></linearGradient></defs>
+      <rect x="60" y="20" width="700" height="190" fill="url(#gk)" opacity=".5" rx="8"/>
+      <line x1="480" y1="20" x2="480" y2="210" stroke="#e8a33c" stroke-dasharray="3 4" opacity=".7"/>
+      <text x="486" y="36" fill="#e8a33c" font-size="12" font-family="Inter,system-ui">60% · blue reaches zero</text>
+      <polyline points="60,20 480,210" fill="none" stroke="#4aa3ff" stroke-width="3"/>
+      <polyline points="60,20 480,96 760,143" fill="none" stroke="#1fa04a" stroke-width="3"/>
+      <polyline points="60,210 480,210 760,115" fill="none" stroke="#e8a33c" stroke-width="3"/>
+      <g font-size="12" fill="#b9ab98" font-family="Inter,system-ui">
+        <text x="60" y="236">0%</text><text x="270" y="236">30%</text><text x="470" y="236">60%</text><text x="740" y="236">100%</text>
+        <text x="8" y="26">100</text><text x="18" y="215">0</text>
+      </g>
+      <g font-size="12" font-family="Inter,system-ui"><text x="700" y="160" fill="#1fa04a">green</text><text x="700" y="108" fill="#e8a33c">tint</text><text x="330" y="150" fill="#4aa3ff">blue</text></g>
+    </svg>
+  </div>
+</div></section>
+
+<section id="how"><div class="wrap">
+  <h2>What it does when the sun goes down</h2>
+  <div class="grid3">
+    <div class="card"><div class="k">Warmth</div><h3>The blue, unmade</h3><p class="v">Not a film laid over the glass but the light itself, taken apart at the source. What is left is red and gold and you can still read by it.</p><p class="d">Blue and green are scaled at the display's own transfer table, the layer beneath every app. Text stays crisp. Screenshots are untouched.</p></div>
+    <div class="card"><div class="k">Keyboard</div><h3>Dimmer than the machine allows</h3><p class="v">The keys go down to a tenth of the least the slider will give you. And after five seconds of stillness, dark.</p><p class="d">The backlight keeps responding below the system slider's floor. Nightfall reaches 0.1%, and turns it off after inactivity, on a timer you choose.</p></div>
+    <div class="card"><div class="k">Learning</div><h3>It watches and says nothing</h3><p class="v">Turn it down one night and it lets you. Turn it down three nights and it knows, and tells you once, and does not ask again.</p><p class="d">Consistent adjustments on three of the last fourteen nights become the default. Switch it on early three evenings and sunset moves. Never more than two hours. One notification, at most once a day. Undo with one command.</p></div>
+  </div>
+</div></section>
+
+<section id="ritual"><div class="wrap">
+  <h2>The ritual</h2>
+  <div class="prose"><p>It does not ask you to remember. It keeps the hour for you, the way the sky did.</p></div>
+  <div class="steps">
+    <div class="step"><div class="t">I</div><h3>Sunset</h3><p>It knows where you are and when the sun goes down there. Over thirty minutes the blue drains out and the keys dim. You will not see it happen. You will only notice, later, that it has.</p></div>
+    <div class="step"><div class="t">II</div><h3>Night</h3><p>Presets for the kind of night it is. Dusk for reading. Night for work. Deep for the last hour. Movie, with the screen shaded down below the hardware minimum.</p></div>
+    <div class="step"><div class="t">III</div><h3>Pause</h3><p>Color work at eleven. A call. Pause it for an hour or until sunrise and it restores your day exactly, and learns nothing from what you do meanwhile.</p></div>
+    <div class="step"><div class="t">IV</div><h3>Sunrise</h3><p>It gives the day back. Whatever you had before dusk, to the setting. Open the lid at any hour and it is already right.</p></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <h2>The numbers</h2>
+  <div class="nums">
+    <div><div class="n">0</div><div class="l">blue light at 60% and above</div></div>
+    <div><div class="n">0.1%</div><div class="l">keyboard backlight floor</div></div>
+    <div><div class="n">30<span style="font-size:.5em">min</span></div><div class="l">sunset fade, adjustable</div></div>
+    <div><div class="n">3</div><div class="l">nights to learn a habit</div></div>
+    <div><div class="n">0</div><div class="l">bytes sent anywhere</div></div>
+  </div>
+</div></section>
+
+<section id="pricing"><div class="wrap">
+  <h2>What it costs</h2>
+  <div class="price">
+    <div class="prose"><p>It costs nothing. It was never for sale. There is no other tier and there is no one on the other end of it. The code is there for anyone to read, and the only thing it asks of you is the evening.</p></div>
+    <div class="box">
+      <div class="eyebrow">Nightfall</div>
+      <div class="big">$0</div>
+      <ul><li>Every feature. Forever.</li><li>No account, no login, no telemetry</li><li>Location used once, on your Mac, for sunrise</li><li>MIT licensed. Fork it.</li></ul>
+      <a class="btn primary" href="https://github.com/ervinyoung/nightfall#install">Get Nightfall for Mac</a>
+    </div>
+  </div>
+</div></section>
+
+<section id="faq"><div class="wrap">
+  <h2>Questions</h2>
+  <details open><summary>Isn't this just Night Shift?</summary><p>Night Shift warms the white point and stops. Blue is still in the light, a little less of it. Nightfall drives blue to zero at 60% and then keeps going, and it does the keyboard, the shade, the fade, the pause, and the learning. Night Shift is a warmer noon. This is dusk.</p></details>
+  <details><summary>Will it make me sleep?</summary><p>It removes a signal that tells your body to stay awake. That is all any light hygiene can do, and it is not nothing: evening blue light is one of the best-documented disruptors of melatonin and circadian timing. The rest, the caffeine and the hour and the phone on the nightstand, is yours.</p></details>
+  <details><summary>Does it phone home?</summary><p>No. There is no server. Location is read from the Mac through Location Services, used to compute sunrise and sunset, and written to a file in your home folder. Nothing leaves the machine. If you would rather, type coordinates in by hand and it will never ask.</p></details>
+  <details><summary>What does it need?</summary><p>An Apple silicon Mac on macOS 26 or later, and the Xcode Command Line Tools to build it. Clone the repository and run the installer. It builds the engine and the menu bar app from source, so you can read every line first.</p></details>
+  <details><summary>Is it safe? Does it use private APIs?</summary><p>The color work uses Apple's public MediaAccessibility and CoreGraphics frameworks. The keyboard control uses a private CoreBrightness interface, the same one the system's own slider uses. If Apple changes it, the keyboard part may stop working until it is updated. Everything else will carry on. The display's color tables are restored the moment the app quits, so nothing can get stuck.</p></details>
+  <details><summary>I don't have an OLED. Does that matter?</summary><p>No. Blue light is blue light on any panel. The red-blob problem people hit with heavy tints is the tint collapsing hue, not the display. Nightfall's curve is designed so that does not happen.</p></details>
+  <p class="fine">Nightfall is a tool for reducing evening blue light exposure. It is not a medical device and makes no medical claims. If you have a sleep disorder, talk to a clinician. Sources: Chang et al., <i>PNAS</i> 2015, on evening light-emitting devices and melatonin; Berson et al., <i>Science</i> 2002, on melanopsin ganglion cells.</p>
+</div></section>
+
+<footer><div class="wrap">
+  <div>Made in Palo Alto by <a href="https://github.com/ervinyoung">Ervin Young</a>. Free and open, MIT.</div>
+  <div><a href="https://github.com/ervinyoung/nightfall">github.com/ervinyoung/nightfall</a></div>
+</div></footer>
+
+<script>
+  // Same curve as the app: channel scaling to the 60% knee, then a luminance-preserving tint.
+  function curve(w){ w=Math.max(0,Math.min(1,w)); if(w<=0.6){var t=w/0.6;return {b:1-t,g:1-0.40*t,tint:0};} var u=(w-0.6)/0.4; return {b:0,g:0.60-0.25*u,tint:0.50*u}; }
+  var wm=document.getElementById('wm'),pct=document.getElementById('pct'),rb=document.getElementById('rb'),rg=document.getElementById('rg'),rt=document.getElementById('rt'),stage=document.getElementById('stage'),slider=document.getElementById('slider');
+  function stageText(w){
+    if(w===0)return 'Off. The screen as it ships: full blue, the signal for noon.';
+    if(w<0.3)return 'Channel scaling begins. Blue is being taken out at the display\'s own transfer table. Nothing is tinted; every color is still itself, only warmer.';
+    if(w<0.6)return 'Most of the blue is gone and green is trimmed. Text is exactly as sharp as it was. This is past where Night Shift can go.';
+    if(w<0.61)return 'The knee. Blue is zero. No tint at all. The most legible a screen can be with no blue in it.';
+    if(w<0.85)return 'Blue stays at zero. Green eases down, and a small luminance-preserving tint folds it back into red brightness so nothing falls to black.';
+    return 'Deep. Green is low and the tint is at its ceiling of 50%, held there on purpose. Beyond this the red swallows everything, so this is where it stops.';
+  }
+  function apply(w){
+    var c=curve(w),t=c.tint,g=c.g,b=c.b;
+    // M = (1-t)·diag(1,g,b) + t·[luma row of diag(1,g,b); 0; 0]
+    var r0=[(1-t)*1+t*0.2126, t*0.7152*g, t*0.0722*b], r1=[0,(1-t)*g,0], r2=[0,0,(1-t)*b];
+    wm.setAttribute('values',[r0[0],r0[1],r0[2],0,0, r1[0],r1[1],r1[2],0,0, r2[0],r2[1],r2[2],0,0, 0,0,0,1,0].map(function(x){return +x.toFixed(4)}).join(' '));
+    pct.textContent=w===0?'Off':Math.round(w*100)+'%';
+    rb.textContent=Math.round(b*100)+'%'; rg.textContent=Math.round(g*100)+'%'; rt.textContent=Math.round(t*100)+'%';
+    stage.textContent=stageText(w);
+    document.querySelectorAll('#presets button').forEach(function(x){x.classList.toggle('on',+x.dataset.v===Math.round(w*100));});
+  }
+  slider.addEventListener('input',function(){apply(slider.value/100)});
+  document.querySelectorAll('#presets button').forEach(function(btn){btn.addEventListener('click',function(){slider.value=btn.dataset.v;apply(btn.dataset.v/100);});});
+  apply(0.8);
+</script>
+</body>
+</html>
