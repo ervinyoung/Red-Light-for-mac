@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Midnight — Zero blue light after dark, for Mac</title>
 <meta name="description" content="Midnight removes blue light from your Mac at sunset and restores it at sunrise. Zero blue at 60%, a keyboard backlight below the system floor, and it learns your nights. Free and open source.">
-<meta property="og:title" content="Midnight — Zero blue. After dark.">
+<meta property="og:title" content="Midnight — Zero blue. Sleep better.">
 <meta property="og:description" content="Take blue light out of your Mac at sunset. Not warmer. Gone. Free, open source, nothing leaves your Mac.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://ervinyoung.github.io/midnight/">
@@ -13,10 +13,11 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230e0d0c'/%3E%3Ccircle cx='32' cy='32' r='12' fill='%23f0652a'/%3E%3C/svg%3E">
 <style>
   :root{
-    /* A warm, neutral black rather than the usual blue-tinted one: a page about removing blue should not be lit by it. */
-    --void:#0e0d0c;--edge:rgba(255,255,255,.08);--snow:#fff;--mist:#a39d96;--ash:#7b756e;
-    /* One accent, the ember the intro leaves behind. 5.9:1 on the background, so it holds even at label sizes. */
-    --ember:#f0652a;--ink:#0e0d0c;
+    /* Two colours, and the rest derived from them: black #000000, red #ff0000, red darkened toward black for depth,
+       white and neutral greys for type. No hue but red appears anywhere on this page. */
+    --black:#000000;--red:#ff0000;--red-80:#cc0000;--red-50:#800000;--red-30:#4d0000;--red-15:#260000;--red-8:#140000;
+    --white:#ffffff;--grey:#a6a6a6;--grey-2:#737373;--edge:rgba(255,255,255,.1);--edge-red:rgba(255,0,0,.25);
+    --void:var(--black);--snow:var(--white);--mist:var(--grey);--ash:var(--grey-2);--ember:var(--red);--ink:var(--black);
     --font:"SF Pro Rounded",ui-rounded,"SF Compact Rounded",-apple-system,BlinkMacSystemFont,system-ui,"Helvetica Neue",sans-serif;
     --sora:var(--font);--inter:var(--font)}
   *{box-sizing:border-box}
@@ -26,13 +27,13 @@
   h1,h2,h3{font-family:var(--font);letter-spacing:-.02em;margin:0;font-weight:700}
   .btn{display:inline-flex;align-items:center;gap:9px;height:44px;padding:0 22px;border-radius:999px;font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase;border:1px solid transparent;transition:transform .15s,background .15s;white-space:nowrap}
   .btn:hover{transform:translateY(-1px)}
-  .btn.white{background:#fff;color:var(--ink);box-shadow:0 0 0 6px rgba(255,255,255,.06)}
-  .btn.white:hover{background:#f3efea}
+  .btn.white{background:var(--red);color:var(--black);box-shadow:0 0 0 6px rgba(255,0,0,.12)}
+  .btn.white:hover{background:#ff2a2a}
   .btn.line{border-color:rgba(255,255,255,.28);color:var(--snow)}
   .btn.line:hover{border-color:rgba(255,255,255,.55)}
   .btn.sm{height:36px;padding:0 16px;font-size:12px}
   .btn svg{width:15px;height:15px}
-  nav{position:fixed;inset-inline:0;top:0;z-index:50;background:rgba(14,13,12,.72);backdrop-filter:blur(16px);border-bottom:1px solid var(--edge)}
+  nav{position:fixed;inset-inline:0;top:0;z-index:50;background:rgba(0,0,0,.72);backdrop-filter:blur(16px);border-bottom:1px solid var(--edge)}
   nav .wrap{height:64px;display:flex;align-items:center;justify-content:space-between}
   .brand{font-family:var(--font);font-weight:700;font-size:19px;letter-spacing:-.01em}
   nav .right{display:flex;gap:10px;align-items:center}
@@ -40,19 +41,19 @@
   /* The field. Deep, dark red with no blue in it, over everything — the nav included. It plays once: scrolling
      opens an iris from the centre, and once it has opened it does not come back. */
   .field{position:fixed;inset:0;z-index:60;overflow:hidden;
-    background:radial-gradient(120vmax 90vmax at 50% 50%, rgb(96,4,0) 0%, rgb(62,2,0) 45%, rgb(30,0,0) 100%);
+    background:radial-gradient(120vmax 90vmax at 50% 50%, var(--red-50) 0%, var(--red-30) 45%, var(--red-8) 100%);
     -webkit-mask:radial-gradient(circle at 50% 50%, transparent var(--hole,0px), #000 calc(var(--hole,0px) + 1px));
             mask:radial-gradient(circle at 50% 50%, transparent var(--hole,0px), #000 calc(var(--hole,0px) + 1px))}
   .field .grain{position:absolute;inset:0;opacity:.12;mix-blend-mode:overlay;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
   .field .inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:var(--textop,1);transform:scale(calc(1 + .05*var(--p,0)))}
-  .field .mark{font-family:var(--font);font-weight:700;letter-spacing:-.03em;line-height:1;font-size:clamp(56px,9vw,120px);color:rgb(214,72,0);opacity:.92;
-    text-shadow:0 0 70px rgba(255,60,0,.35)}
-  .field .cue{position:absolute;bottom:34px;left:50%;transform:translateX(-50%);font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:rgb(180,60,0);opacity:var(--textop,1);display:flex;flex-direction:column;align-items:center;gap:10px}
-  .field .cue i{width:1px;height:34px;background:linear-gradient(180deg,rgb(200,70,0),transparent);display:block;animation:drip 2.4s ease-in-out infinite}
+  .field .mark{font-family:var(--font);font-weight:700;letter-spacing:-.03em;line-height:1;font-size:clamp(56px,9vw,120px);color:var(--red);
+    text-shadow:0 0 70px rgba(255,0,0,.35)}
+  .field .cue{position:absolute;bottom:34px;left:50%;transform:translateX(-50%);font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--red-80);opacity:var(--textop,1);display:flex;flex-direction:column;align-items:center;gap:10px}
+  .field .cue i{width:1px;height:34px;background:linear-gradient(180deg,var(--red),transparent);display:block;animation:drip 2.4s ease-in-out infinite}
   @keyframes drip{0%{transform:scaleY(.2);transform-origin:top;opacity:0}40%{transform:scaleY(1);opacity:1}100%{transform:scaleY(1);opacity:0}}
   .rim{position:fixed;left:50%;top:50%;width:calc(var(--hole,0px)*2);height:calc(var(--hole,0px)*2);transform:translate(-50%,-50%);border-radius:50%;z-index:61;pointer-events:none;opacity:var(--rimop,0);
-    box-shadow:0 0 0 1px rgba(255,120,0,.55),0 0 40px 6px rgba(255,60,0,.45)}
+    box-shadow:0 0 0 1px rgba(255,0,0,.6),0 0 40px 6px rgba(255,0,0,.4)}
   .reveal{position:relative;height:calc(var(--pinh,100vh) + var(--budget,55vh))}
   .reveal.off{height:auto}.reveal.off .hero{position:relative}
   .hero{position:sticky;top:0;padding:112px 0 0;overflow:hidden;background:var(--void)}
@@ -63,8 +64,8 @@
   .hero .fine{font-size:12.5px;color:var(--ash);margin-top:14px}
   .shot{position:relative;margin:40px auto 0;max-width:1032px;height:min(56vh,520px);border-radius:18px 18px 0 0;overflow:hidden;border:1px solid rgba(255,255,255,.12);border-bottom:0;filter:url(#hero);
     box-shadow:0 40px 120px rgba(0,0,0,.65);
-    background:radial-gradient(900px 420px at 50% 112%, rgba(240,163,58,.55), rgba(194,83,45,.35) 38%, rgba(20,14,22,0) 72%),linear-gradient(180deg,#1f1a2b 0%,#33213a 32%,#5a2d34 62%,#1d1512 100%)}
-  .menubar{position:absolute;inset-inline:0;top:0;height:30px;background:rgba(20,20,24,.62);backdrop-filter:blur(20px);display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-size:12.5px;font-weight:500;color:#e8e8ec;border-bottom:1px solid rgba(255,255,255,.06)}
+    background:radial-gradient(900px 420px at 50% 112%, rgba(255,0,0,.45), rgba(128,0,0,.35) 38%, rgba(0,0,0,0) 72%),linear-gradient(180deg,#000 0%,#140000 40%,#4d0000 78%,#260000 100%)}
+  .menubar{position:absolute;inset-inline:0;top:0;height:30px;background:rgba(20,20,24,.62);backdrop-filter:blur(20px);display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-size:12.5px;font-weight:500;color:#e8e8e8;border-bottom:1px solid rgba(255,255,255,.06)}
   .menubar .l{display:flex;gap:18px}.menubar .l b{font-weight:700}
   .menubar .r{display:flex;gap:14px;align-items:center}.menubar .r svg{width:15px;height:15px;opacity:.9}
   .menubar .active{display:flex;align-items:center;justify-content:center;width:30px;height:22px;border-radius:6px;background:rgba(255,255,255,.16)}
@@ -73,16 +74,39 @@
   .shot .cap{position:absolute;left:28px;bottom:24px;font-size:13px;color:rgba(255,255,255,.7)}
   .shot .cap b{display:block;font-family:var(--font);font-size:20px;font-weight:700;color:#fff;margin-bottom:4px}
 
-  section{padding:72px 0;border-top:1px solid var(--edge)}
-  .three{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
-  .three .k{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--ember);font-weight:600}
-  .three h3{font-size:22px;font-weight:700;margin:10px 0 8px;line-height:1.15}
-  .three p{color:var(--mist);font-size:15px;margin:0;line-height:1.55}
+  section{padding:64px 0 72px;border-top:1px solid var(--edge)}
+  .core{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .core .card{position:relative;border:1px solid var(--edge);border-radius:20px;padding:28px;min-height:300px;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;background:var(--black)}
+  .core .card .k{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--red);font-weight:600}
+  .core .card h3{font-size:clamp(24px,2.4vw,30px);font-weight:700;margin:10px 0 8px;line-height:1.1;letter-spacing:-.02em}
+  .core .card p{color:var(--mist);font-size:15px;margin:0;line-height:1.55;max-width:440px}
+  .core .card .vis{margin-bottom:auto}
+  /* 1 · native: the real panel, cropped, in a card that is itself styled like a Control Center row */
+  .core .native{grid-column:1 / -1;flex-direction:row;align-items:flex-end;gap:32px;min-height:0;padding-right:0;padding-top:0}
+  .core .native .txt{flex:1;padding:28px 0 4px}
+  .core .native .frame{width:303px;height:400px;flex:none;align-self:flex-end;overflow:hidden;border-radius:22px 0 0 0;box-shadow:0 0 0 .5px rgba(255,255,255,.14) inset,-10px 0 40px rgba(0,0,0,.6);margin-top:28px;
+    -webkit-mask:linear-gradient(180deg,#000 82%,transparent);mask:linear-gradient(180deg,#000 82%,transparent)}
+  .core .native .frame img{display:block;width:303px;height:auto}
+  /* 2 · deep reds: the ramp from white to the deepest red, blue gone at 60 % */
+  .ramp{height:56px;border-radius:12px;border:1px solid var(--edge);position:relative;
+    background:linear-gradient(90deg,#fff 0%,#ffd6bf 20%,#ff9d8a 40%,#ff3b3b 60%,#ff0000 62%,#b30000 80%,#4d0000 100%)}
+  .ramp i{position:absolute;top:-8px;bottom:-8px;left:60%;width:2px;background:#fff;border-radius:2px}
+  .ramp b{position:absolute;left:60%;top:calc(100% + 10px);transform:translateX(-50%);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--white);white-space:nowrap;font-weight:600}
+  .ramp small{position:absolute;top:calc(100% + 10px);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--grey-2)}
+  .ramp small.l{left:0}.ramp small.r{right:0}
+  /* 3 · free */
+  .core .free .big{font-family:var(--font);font-weight:700;font-size:clamp(72px,9vw,120px);line-height:.9;letter-spacing:-.04em;color:var(--red)}
+  /* 4 · sleep */
+  .stats{display:flex;gap:28px}
+  .stats .n{font-family:var(--font);font-weight:700;font-size:clamp(40px,4.6vw,60px);line-height:1;letter-spacing:-.03em;color:var(--white)}
+  .stats .n small{font-size:.45em;color:var(--red);margin-left:3px}
+  .stats .l{font-size:12.5px;color:var(--grey-2);margin-top:6px;max-width:160px;line-height:1.45}
+  .cite{font-size:11.5px;color:var(--grey-2);margin-top:16px;line-height:1.5}
   footer{border-top:1px solid var(--edge);padding:34px 0 40px;color:var(--ash);font-size:13px}
   footer .wrap{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px}
   footer a{color:var(--mist)}footer a:hover{color:var(--ember)}
   @media (prefers-reduced-motion:reduce){.field,.rim{display:none}.reveal{height:auto}.hero{position:relative}}
-  @media (max-width:860px){.three{grid-template-columns:1fr}.panel{right:12px;width:270px}.shot{height:440px}.shot .cap{display:none}nav .line{display:none}}
+  @media (max-width:860px){.core{grid-template-columns:1fr}.core .native{flex-direction:column;align-items:flex-start;padding-right:28px}.core .native .frame{width:100%;border-radius:22px}.panel{right:12px;width:270px}.shot{height:440px}.shot .cap{display:none}nav .line{display:none}}
 </style>
 </head>
 <body>
@@ -108,8 +132,8 @@
 <div class="reveal" id="reveal">
 <header class="hero" id="product">
   <div class="wrap">
-    <h1>Zero blue.<br><span class="grad">After dark.</span></h1>
-    <p class="sub">Midnight removes blue light from your Mac at sunset and gives it back at sunrise. Not warmer. Gone. The keyboard too, dimmer than the system allows.</p>
+    <h1>Zero blue.<br><span class="grad">Sleep better.</span></h1>
+    <p class="sub">Midnight removes every bit of blue light from your Mac at sunset and gives it back at sunrise. Deep, true reds, in a panel that looks like Apple made it. Free.</p>
     <div class="ctas">
       <a class="btn white" href="https://github.com/ervinyoung/midnight#install"><svg viewBox="0 0 17 20" fill="currentColor"><path d="M14.1 10.6c0-2.7 2.2-3.9 2.3-4-1.3-1.8-3.2-2.1-3.9-2.1-1.7-.2-3.2 1-4.1 1-.8 0-2.1-1-3.5-.9C3.1 4.6 1.4 5.6.5 7.3c-1.9 3.3-.5 8.1 1.4 10.8.9 1.3 2 2.8 3.4 2.7 1.4-.1 1.9-.9 3.5-.9s2.1.9 3.5.9c1.5 0 2.4-1.3 3.3-2.7 1-1.5 1.5-3 1.5-3.1-.1 0-2.9-1.1-3-4.4zM11.4 2.7c.7-.9 1.2-2.1 1.1-3.3-1 0-2.3.7-3 1.6-.7.8-1.3 2-1.1 3.2 1.1.1 2.3-.6 3-1.5z"/></svg>Download for Mac</a>
       <a class="btn line" href="https://github.com/ervinyoung/midnight">View source</a>
@@ -133,10 +157,30 @@
 </div>
 
 <section><div class="wrap">
-  <div class="three">
-    <div><div class="k">Warmth</div><h3>Zero blue at 60%</h3><p>Blue is scaled to nothing at the display's own transfer table, so text stays crisp. Past 60% it goes deeper with a small luminance-preserving tint, never a red blob.</p></div>
-    <div><div class="k">Keyboard</div><h3>0.1%, then off</h3><p>A tenth of the least the system slider allows, and dark after five seconds of stillness. Sunset fades everything in over thirty minutes.</p></div>
-    <div><div class="k">Learning</div><h3>Three nights, then it knows</h3><p>Adjust anything by hand and it lets you. Do it the same way on three nights and that becomes the default. On-device, one notification, one command to undo.</p></div>
+  <div class="core">
+    <div class="card native">
+      <div class="txt"><div class="k">Native</div><h3>Indistinguishable from Control Center.</h3><p>The same rows, the same sliders, the same glass, measured from Apple's own panels to the point. It lives in the menu bar and looks like it shipped with the Mac.</p></div>
+      <div class="frame"><img src="img/panel.png" alt="The Midnight panel: Warmth, Screen Shade, Keyboard Backlight and presets, in the style of Control Center"></div>
+    </div>
+    <div class="card">
+      <div class="vis"><div class="ramp"><i></i><b>60% · blue at zero</b><small class="l">Off</small><small class="r">100%</small></div></div>
+      <div style="height:34px"></div>
+      <div class="k">Deep reds</div><h3>Every blue subpixel, off.</h3><p>Blue isn't dimmed, it's driven to zero at the display's own transfer table, and text stays crisp. Past 60% the reds go deeper without collapsing into mush.</p>
+    </div>
+    <div class="card free">
+      <div class="vis"><div class="big">$0</div></div>
+      <div class="k">Free</div><h3>No account. No tier. No catch.</h3><p>Open source under MIT. Location is used on your Mac for sunrise and sunset and nothing leaves it.</p>
+    </div>
+    <div class="card" style="grid-column:1 / -1">
+      <div class="vis stats">
+        <div><div class="n">55<small>%</small></div><div class="l">less evening melatonin after reading on a lit screen versus paper</div></div>
+        <div><div class="n">1.5<small>h</small></div><div class="l">later circadian phase after five nights of it</div></div>
+        <div><div class="n">0<small>%</small></div><div class="l">blue channel output at Midnight 60% and above</div></div>
+      </div>
+      <div style="height:26px"></div>
+      <div class="k">Sleep better</div><h3>Give melatonin its evening back.</h3><p>Evening screen light holds melatonin down and pushes your clock later. Midnight removes the signal at sunset and hands the day back at sunrise, every night, without you touching it.</p>
+      <div class="cite">Chang, Aeschbach, Duffy &amp; Czeisler, PNAS 2015. Midnight reduces evening blue light exposure; it is not a medical device.</div>
+    </div>
   </div>
 </div></section>
 
