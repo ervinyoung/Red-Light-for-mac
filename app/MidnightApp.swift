@@ -408,9 +408,8 @@ struct Step: Identifiable { let label: String; let value: Double?; var id: Strin
 // Denser above the 60 % knee, where blue is already gone and each step is a different feel of red.
 let warmSteps  = [Step(label: "Off", value: nil), Step(label: "15%", value: 0.15), Step(label: "30%", value: 0.3), Step(label: "45%", value: 0.45),
                   Step(label: "60%", value: 0.6), Step(label: "70%", value: 0.7), Step(label: "80%", value: 0.8), Step(label: "90%", value: 0.9), Step(label: "100%", value: 1.0)]
-// 0.01 % is the hardware floor: the driver's nits-to-PWM table bottoms out there, and every lower value lights the
-// keys identically. It is about 13 % less light than 0.1 %. Only "Off" is darker.
-let keySteps   = [Step(label: "Off", value: nil), Step(label: "0.01%", value: 0.0001), Step(label: "0.1%", value: 0.001), Step(label: "0.3%", value: 0.003), Step(label: "1%", value: 0.01), Step(label: "5%", value: 0.05), Step(label: "30%", value: 0.3)]
+// 0.1 % is the practical floor: the keyboard's PWM table bottoms out just beneath it and anything lower looks the same.
+let keySteps   = [Step(label: "Off", value: nil), Step(label: "0.1%", value: 0.001), Step(label: "0.3%", value: 0.003), Step(label: "1%", value: 0.01), Step(label: "5%", value: 0.05), Step(label: "30%", value: 0.3)]
 let shadeSteps = [Step(label: "Off", value: nil), Step(label: "20%", value: 0.2), Step(label: "40%", value: 0.4), Step(label: "60%", value: 0.6), Step(label: "80%", value: 0.8)]
 let idleSteps  = [Step(label: "5 s", value: 5), Step(label: "10 s", value: 10), Step(label: "30 s", value: 30), Step(label: "1 min", value: 60), Step(label: "5 min", value: 300)]
 func fmtSeconds(_ v: Double?) -> String {
