@@ -10,6 +10,15 @@ In a panel indistinguishable from Control Center. Free, open source, on-device, 
 
 Site: https://ervinyoung.github.io/red-light-for-mac
 
+## The science
+Controlled human studies, each linked to its paper:
+- **55% less evening melatonin** and a **1.5 h later circadian clock** after reading on a light-emitting screen instead of paper, with reduced next-morning alertness. Chang, Aeschbach, Duffy & Czeisler, [PNAS 2015](https://www.pnas.org/doi/10.1073/pnas.1418490112).
+- **99% of people** had a delayed melatonin onset under ordinary room light before bed; melatonin duration shortened by **~90 min**. Gooley et al., [J Clin Endocrinol Metab 2011](https://doi.org/10.1210/jc.2010-2098), n = 116.
+- The **blue content** of a display, not its brightness or colour, predicts melatonin suppression and sleep latency; "spectrally tuning the visual display light" is the fix. Schöllhorn et al., [Communications Biology 2023](https://doi.org/10.1038/s42003-023-04598-4), n = 72.
+- The retinal cells that set the clock peak near **480 nm**, in a display's blue. Berson, Dunn & Takao, [Science 2002](https://doi.org/10.1126/science.1067262).
+
+Red Light for Mac is not a medical device and makes no medical claims.
+
 ## Install
 Apple silicon Mac, macOS 26 or later, Xcode Command Line Tools (`xcode-select --install`).
 

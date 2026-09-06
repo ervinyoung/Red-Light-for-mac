@@ -75,16 +75,26 @@
   .shot .cap b{display:block;font-family:var(--font);font-size:20px;font-weight:700;color:#fff;margin-bottom:4px}
 
   section{padding:64px 0 72px;border-top:1px solid var(--edge)}
-  /* the word from Huberman Lab, verbatim */
-  .huber{padding:56px 0 8px;border-top:0}
-  .huber .q{font-family:var(--font);font-weight:700;font-size:clamp(28px,4vw,46px);line-height:1.08;letter-spacing:-.025em;max-width:900px}
-  .huber .q em{font-style:normal;color:var(--red)}
-  .huber .who{margin-top:16px;font-size:13px;color:var(--grey-2)}
-  .huber .who a{color:var(--grey);border-bottom:1px solid var(--edge)}
-  .huber .row{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:34px}
-  .huber .row div{border-left:2px solid var(--red-50);padding-left:14px}
-  .huber .row p{margin:0;font-size:14.5px;line-height:1.5;color:var(--grey)}
-  .huber .row p b{display:block;color:var(--white);font-weight:600;margin-bottom:4px;font-size:15px}
+  /* peer-reviewed numbers, each linked to its paper */
+  .sci{padding:64px 0 24px;border-top:0}
+  .sci .k{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--red);font-weight:600;margin-bottom:12px}
+  .sci h2{font-size:clamp(34px,4.6vw,54px);font-weight:700;line-height:1.04;letter-spacing:-.025em;max-width:820px}
+  .sci .lead{color:var(--grey);font-size:16px;max-width:640px;margin:14px 0 0;line-height:1.55}
+  .wall{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:40px}
+  .wall a{display:block;border:1px solid var(--edge);border-radius:18px;padding:24px 22px 20px;background:rgba(255,255,255,.02);transition:border-color .15s,background .15s}
+  .wall a:hover{border-color:var(--edge-red);background:rgba(255,0,0,.04)}
+  .wall .n{font-family:var(--font);font-weight:700;font-size:clamp(46px,5.2vw,68px);line-height:.95;letter-spacing:-.04em;color:var(--white)}
+  .wall .n small{font-size:.42em;color:var(--red);margin-left:2px;letter-spacing:-.02em}
+  .wall .f{margin-top:12px;font-size:14.5px;line-height:1.45;color:var(--white)}
+  .wall .src{margin-top:14px;padding-top:12px;border-top:1px solid var(--edge);font-size:11.5px;letter-spacing:.04em;color:var(--grey-2);line-height:1.5}
+  .wall .src b{color:var(--grey);font-weight:600}
+  .pull{margin-top:18px;border:1px solid var(--edge-red);border-radius:18px;padding:26px 28px;display:grid;grid-template-columns:1.4fr 1fr;gap:28px;align-items:center;background:linear-gradient(90deg,rgba(255,0,0,.06),rgba(255,0,0,0))}
+  .pull q{font-family:var(--font);font-weight:700;font-size:clamp(20px,2.3vw,27px);line-height:1.25;letter-spacing:-.02em;quotes:"“" "”"}
+  .pull .by{font-size:12px;color:var(--grey-2);margin-top:10px}
+  .pull .by a{color:var(--grey)}
+  .pull .ans{font-size:14.5px;color:var(--grey);line-height:1.55;border-left:2px solid var(--red);padding-left:16px}
+  .pull .ans b{color:var(--white);display:block;margin-bottom:4px}
+  .sci .note{font-size:11.5px;color:var(--grey-2);margin-top:18px}
   /* the native card shows the measurements instead of a second screenshot */
   .specs{width:100%;max-width:420px;border:1px solid var(--edge);border-radius:16px;padding:6px 14px 4px;background:rgba(255,255,255,.02);margin-bottom:26px}
   .specs div{display:flex;justify-content:space-between;align-items:center;height:32px;font-size:13px;color:var(--grey);border-top:1px solid var(--edge)}
@@ -122,7 +132,7 @@
   footer .wrap{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px}
   footer a{color:var(--mist)}footer a:hover{color:var(--ember)}
   @media (prefers-reduced-motion:reduce){.field,.rim{display:none}.reveal{height:auto}.hero{position:relative}}
-  @media (max-width:860px){.huber .row{grid-template-columns:1fr}.core{grid-template-columns:1fr}.core .native{flex-direction:column;align-items:flex-start;padding-right:28px}.core .native .frame{width:100%;border-radius:22px}.panel{right:12px;width:270px}.shot{height:440px}.shot .cap{display:none}nav .line{display:none}}
+  @media (max-width:860px){.wall{grid-template-columns:1fr 1fr}.pull{grid-template-columns:1fr}.core{grid-template-columns:1fr}.core .native{flex-direction:column;align-items:flex-start;padding-right:28px}.core .native .frame{width:100%;border-radius:22px}.panel{right:12px;width:270px}.shot{height:440px}.shot .cap{display:none}nav .line{display:none}}
 </style>
 </head>
 <body>
@@ -172,14 +182,24 @@
 </header>
 </div>
 
-<section class="huber"><div class="wrap">
-  <p class="q">“Avoid viewing bright lights—especially bright overhead lights between <em>10&nbsp;pm and 4&nbsp;am</em>.”</p>
-  <div class="who">Andrew Huberman, <a href="https://www.hubermanlab.com/newsletter/toolkit-for-sleep">Huberman Lab · Toolkit for Sleep</a>. Red Light applies it to the brightest light in the room: your screen.</div>
-  <div class="row">
-    <div><p><b>“Bright light powerfully inhibits melatonin.”</b>Huberman Lab, <a href="https://www.hubermanlab.com/newsletter/using-light-for-health" style="color:var(--grey-2)">Using Light for Health</a></p></div>
-    <div><p><b>“Try to use amber or red light (longer wavelengths), as this type of light more minimally impacts melatonin levels.”</b>Same newsletter. Red Shift at 60% is exactly that: zero blue, and it keeps going.</p></div>
-    <div><p><b>“Limiting bright screens and artificial light before bed helps signal to your body that it's time to wind down.”</b>Toolkit for Sleep. Red Light does it at sunset, automatically, every night.</p></div>
+<section class="sci"><div class="wrap">
+  <div class="k">Peer-reviewed</div>
+  <h2>The science isn't subtle.</h2>
+  <p class="lead">Controlled human studies, published in the journals that matter. Every number below links to the paper it comes from.</p>
+  <div class="wall">
+    <a href="https://www.pnas.org/doi/10.1073/pnas.1418490112"><div class="n">55<small>%</small></div><div class="f">less evening melatonin after reading on a light-emitting screen instead of paper.</div><div class="src"><b>Chang, Aeschbach, Duffy &amp; Czeisler</b><br>PNAS · 2015 · Harvard Medical School</div></a>
+    <a href="https://www.pnas.org/doi/10.1073/pnas.1418490112"><div class="n">1.5<small>h</small></div><div class="f">later circadian clock after five evenings on the lit screen, with reduced alertness the next morning.</div><div class="src"><b>Same study</b><br>PNAS · 2015</div></a>
+    <a href="https://doi.org/10.1210/jc.2010-2098"><div class="n">99<small>%</small></div><div class="f">of people had a delayed melatonin onset under ordinary room light before bed. Night, as the body counts it, shortened by about 90 minutes.</div><div class="src"><b>Gooley et al.</b><br>J. Clin. Endocrinol. Metab. · 2011 · n = 116</div></a>
+    <a href="https://doi.org/10.1126/science.1067262"><div class="n">480<small>nm</small></div><div class="f">peak sensitivity of the retinal cells that set your clock. Squarely in the blue that displays emit.</div><div class="src"><b>Berson, Dunn &amp; Takao</b><br>Science · 2002</div></a>
   </div>
+  <div class="pull">
+    <div>
+      <q>Our results may help the many people who sit in front of screens in the evening or at night to fall asleep faster, feel sleepier, and have a more stable melatonin phase by spectrally tuning the visual display light without compromising the visual appearance.</q>
+      <div class="by">Schöllhorn, Stefani, Lucas, Spitschan, Slawik &amp; Cajochen · <a href="https://doi.org/10.1038/s42003-023-04598-4">Communications Biology, 2023</a> · n = 72. The blue content of the display, not its brightness or colour, predicted the damage.</div>
+    </div>
+    <div class="ans"><b>That is Red Shift.</b>It tunes the display's spectrum at the transfer table: the blue channel, where those cells are most sensitive, goes to zero at 60% while text stays crisp. Automatically, at sunset.</div>
+  </div>
+  <p class="note">Red Light for Mac reduces evening blue light exposure. It is not a medical device and makes no medical claims.</p>
 </div></section>
 
 <section><div class="wrap">
@@ -206,13 +226,13 @@
     </div>
     <div class="card" style="grid-column:1 / -1">
       <div class="vis stats">
-        <div><div class="n">55<small>%</small></div><div class="l">less evening melatonin after reading on a lit screen versus paper</div></div>
-        <div><div class="n">1.5<small>h</small></div><div class="l">later circadian phase after five nights of it</div></div>
-        <div><div class="n">0<small>%</small></div><div class="l">blue channel output at Red Light 60% and above</div></div>
+        <div><div class="n">0<small>%</small></div><div class="l">blue channel output at Red Shift 60% and above</div></div>
+        <div><div class="n">30<small>min</small></div><div class="l">sunset fade, so you never see it happen</div></div>
+        <div><div class="n">3</div><div class="l">nights of the same adjustment before it becomes your default</div></div>
       </div>
       <div style="height:26px"></div>
       <div class="k">Sleep better</div><h3>Protect the melatonin you're already paying for.</h3><p>You track the sleep, time the caffeine, dim the house. Then a blue screen at 11 PM tells your retina it's noon. Red Light removes that signal at sunset, automatically, every night. Run it for two weeks and read your own deep sleep and latency. n = 1, like everything that works.</p>
-      <div class="cite">Chang, Aeschbach, Duffy &amp; Czeisler, PNAS 2015. Red Light reduces evening blue light exposure; it is not a medical device.</div>
+      <div class="cite">Runs on your Mac, from your sunset to your sunrise, without an account.</div>
     </div>
   </div>
 </div></section>
