@@ -524,6 +524,20 @@ struct SwitchView: View {
         }
     }
 }
+struct PillButton: View {
+    let title: String; var prominent = false; var drawn = false; let action: () -> Void
+    var body: some View {
+        if drawn {
+            Text(title).font(CC.small).foregroundStyle(prominent ? Color.white : .primary)
+                .padding(.horizontal, 12).frame(height: 26)
+                .background(Capsule().fill(prominent ? Color.accentColor : Color.primary.opacity(0.14)))
+        } else if prominent {
+            Button(title) { action() }.buttonStyle(.glassProminent).controlSize(.small)
+        } else {
+            Button(title) { action() }.buttonStyle(.glass).controlSize(.small)
+        }
+    }
+}
 struct ToggleRow: View {
     let label: String; let isOn: Binding<Bool>; var drawn = false
     var body: some View { HStack { Text(label).font(CC.row); Spacer(); SwitchView(isOn: isOn, small: true, drawn: drawn) }.frame(height: 32) }
@@ -641,7 +655,7 @@ struct SettingsPage: View {
     var body: some View {
         VStack(spacing: 0) {
             TitleBlock(title: "Nightfall Settings", subtitle: "Sunrise \(m.sunriseText) · Sunset \(m.sunsetText)") {
-                Button { back() } label: { Text("Done").font(CC.small) }.buttonStyle(.glass).controlSize(.small)
+                PillButton(title: "Done", drawn: m.snapshotMode) { back() }
             }
 
             Header(text: "Sun")
@@ -654,8 +668,8 @@ struct SettingsPage: View {
                 TextRow(text: "Location access is off. Allow it in System Settings › Privacy & Security › Location Services, or enter coordinates.", secondary: true)
             }
             HStack(spacing: 8) {
-                Button("Use My Location") { m.useMyLocation() }.buttonStyle(.glass).controlSize(.small)
-                Button(editingLocation ? "Cancel" : "Enter Coordinates…") { editingLocation.toggle() }.buttonStyle(.glass).controlSize(.small)
+                PillButton(title: "Use My Location", drawn: m.snapshotMode) { m.useMyLocation() }
+                PillButton(title: editingLocation ? "Cancel" : "Enter Coordinates…", drawn: m.snapshotMode) { editingLocation.toggle() }
                 Spacer()
             }.frame(height: 32)
             if editingLocation {
@@ -711,7 +725,7 @@ struct SettingsPage: View {
     }
     func shortcutRow(_ label: String, _ key: String, _ sc: Shortcut) -> some View {
         HStack { Text(label).font(CC.row); Spacer()
-            Button(m.recording == key ? "Recording…" : describe(sc)) { m.recording == key ? m.stopRecording() : m.startRecording(key) }.buttonStyle(.glass).controlSize(.small).font(.system(size: 11, design: .monospaced))
+            PillButton(title: m.recording == key ? "Recording…" : describe(sc), drawn: m.snapshotMode) { m.recording == key ? m.stopRecording() : m.startRecording(key) }
         }.frame(height: 32)
     }
 }
