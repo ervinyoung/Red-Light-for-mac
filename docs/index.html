@@ -15,13 +15,16 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='36' r='16' fill='%23f0a33a'/%3E%3Crect x='0' y='36' width='64' height='28' fill='%230d0e11'/%3E%3C/svg%3E">
 <style>
   :root{
+    --t:0;                                   /* 0 = full Nightfall red, 1 = neutral dark; set by scroll */
+    --red:#c8200f; --red2:#6d0c07; --cream:#fff2e3;
+    --bg:var(--red);
     --void:#0d0e11; --canvas:#111318; --edge:rgba(255,255,255,.08); --snow:#ffffff; --mist:#9aa0ab; --ash:#6b7280;
     --amber:#f0a33a; --amber2:#ffbf5c; --ink:#1a1108;
     --sora:Sora,Inter,ui-sans-serif,system-ui,sans-serif; --inter:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
-  body{margin:0;background:var(--void);color:var(--snow);font-family:var(--inter);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  body{margin:0;background:var(--bg);color:var(--snow);font-family:var(--inter);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
   a{color:inherit;text-decoration:none}
   .wrap{max-width:1140px;margin:0 auto;padding:0 24px}
   h1,h2,h3{font-family:var(--sora);letter-spacing:-.02em;margin:0}
@@ -37,7 +40,7 @@
   .btn.sm{height:36px;padding:0 16px;font-size:12px}
   .btn svg{width:15px;height:15px}
   /* nav */
-  nav{position:fixed;inset-inline:0;top:0;z-index:50;background:rgba(13,14,17,.72);backdrop-filter:blur(16px);border-bottom:1px solid var(--edge)}
+  nav{position:fixed;inset-inline:0;top:0;z-index:50;background:var(--navbg,rgba(80,10,6,.35));backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,.1)}
   nav .wrap{height:64px;display:flex;align-items:center;justify-content:space-between;gap:20px}
   .brand{display:flex;align-items:center;gap:9px;font-family:var(--sora);font-weight:700;font-size:19px}
   .brand svg{width:24px;height:24px}
@@ -45,16 +48,29 @@
   nav ul a:hover{color:#fff}
   nav .right{display:flex;gap:10px;align-items:center}
   /* hero */
-  .hero{padding:150px 0 40px;position:relative;overflow:hidden}
-  .hero .glow{position:absolute;left:50%;top:60%;transform:translateX(-50%);width:1400px;height:900px;pointer-events:none;
-    background:radial-gradient(closest-side,rgba(240,163,58,.16),rgba(240,163,58,.05) 45%,transparent 70%)}
+  .hero{padding:150px 0 40px;position:relative;overflow:hidden;min-height:100vh;
+    background:linear-gradient(180deg,rgba(0,0,0,0) 0%,rgba(0,0,0,.28) 100%)}
+  .hero .sky{position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(1400px 700px at 50% 120%,rgba(255,214,150,calc(.55*var(--t))),rgba(255,140,60,calc(.25*var(--t))) 35%,transparent 70%)}
+  .hero .sun{position:absolute;left:50%;width:min(64vw,720px);aspect-ratio:1;border-radius:50%;pointer-events:none;
+    bottom:calc(-58% + var(--t)*44%);transform:translateX(-50%);opacity:calc(.35 + .65*var(--t));
+    background:radial-gradient(circle at 50% 42%,#fff2cf 0%,#ffcb6b 22%,#ff8f3c 48%,rgba(255,80,30,.55) 68%,rgba(255,60,20,0) 74%);
+    filter:blur(calc(6px + 18px*(1 - var(--t))));mix-blend-mode:screen}
+  .hero .grain{position:absolute;inset:0;pointer-events:none;opacity:.07;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+  .hero .wrap{position:relative}
+  .hero .kick{display:inline-flex;align-items:center;gap:10px;font-size:12px;letter-spacing:.16em;text-transform:uppercase;font-weight:600;color:var(--cream);opacity:.85;margin-bottom:22px}
+  .hero .kick i{width:8px;height:8px;border-radius:50%;background:#ffcb6b;box-shadow:0 0 14px #ffb347;display:inline-block}
+  .hero .scroll{position:absolute;left:50%;bottom:26px;transform:translateX(-50%);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,242,227,.7);display:flex;flex-direction:column;align-items:center;gap:8px;opacity:calc(1 - var(--t)*2)}
+  .hero .scroll span{width:1px;height:38px;background:linear-gradient(180deg,rgba(255,242,227,.8),transparent);display:block}
   .hero h1{font-size:clamp(56px,8.6vw,96px);font-weight:600;line-height:1.02;max-width:900px}
-  .hero h1 .grad{background:linear-gradient(90deg,#fff 0%,#ffd39a 55%,#f0a33a 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
-  .hero .sub{font-size:clamp(17px,2vw,21px);color:var(--mist);max-width:640px;margin:26px 0 34px;line-height:1.5}
+  .hero h1 .grad{background:linear-gradient(90deg,#fff6ea 0%,#ffd39a 55%,#ffb04a 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero .sub{font-size:clamp(17px,2vw,21px);color:var(--cream);opacity:.88;max-width:640px;margin:26px 0 34px;line-height:1.5}
   .hero .ctas{display:flex;gap:12px;flex-wrap:wrap}
-  .hero .fine{font-size:12.5px;color:var(--ash);margin-top:18px}
+  .hero .fine{font-size:12.5px;color:var(--cream);opacity:.6;margin-top:18px}
+  .hero .btn.line{border-color:rgba(255,242,227,.4)}
   /* product shot */
-  .shot{position:relative;margin:56px auto 0;max-width:1080px;border-radius:18px;overflow:hidden;border:1px solid rgba(255,255,255,.12);
+  .shot{position:relative;margin:56px auto 0;max-width:1080px;border-radius:18px;overflow:hidden;border:1px solid rgba(255,255,255,.12);filter:url(#hero);
     box-shadow:0 40px 120px rgba(0,0,0,.65),0 0 0 1px rgba(0,0,0,.6);aspect-ratio:16/9.4;
     background:
       radial-gradient(900px 420px at 50% 112%, rgba(240,163,58,.55), rgba(194,83,45,.35) 38%, rgba(20,14,22,0) 72%),
@@ -72,7 +88,7 @@
   .shot .caption b{display:block;font-family:var(--sora);font-size:22px;color:#fff;margin-bottom:6px;letter-spacing:-.01em}
   .shot .caption .k{display:inline-block;margin-top:10px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);font-weight:600}
   /* sections */
-  section{padding:110px 0;border-top:1px solid var(--edge)}
+  section{padding:110px 0;border-top:1px solid var(--edge);background:var(--void)}
   section.canvas{background:var(--canvas)}
   .kicker{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--amber);font-weight:600;margin-bottom:14px}
   h2{font-size:clamp(36px,5vw,58px);font-weight:600;line-height:1.05}
@@ -189,6 +205,7 @@
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <filter id="warmth" color-interpolation-filters="sRGB"><feColorMatrix id="wm" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/></filter>
+  <filter id="hero" color-interpolation-filters="sRGB"><feColorMatrix id="hm" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/></filter>
 </svg>
 
 <nav><div class="wrap">
@@ -201,8 +218,9 @@
 </div></nav>
 
 <header class="hero" id="product">
-  <div class="glow"></div>
+  <div class="sky"></div><div class="sun"></div><div class="grain"></div>
   <div class="wrap">
+    <div class="kick"><i></i>This is your screen at Warmth 100%</div>
     <h1>Zero blue.<br><span class="grad">After dark.</span></h1>
     <p class="sub">Nightfall takes the blue light out of your Mac at sunset and gives it back at sunrise. Not warmer. Gone. The keyboard too, dimmer than the system will let you go.</p>
     <div class="ctas">
@@ -223,9 +241,10 @@
         </div>
       </div>
       <div class="panel"><img src="img/panel.png" alt="" width="303"></div>
-      <div class="caption"><b>Sunset, 7:29 PM. Fading in.</b>The real panel, not a mockup. One slider for blue light. One for the keyboard. Presets for the kind of night it is. It lives in the menu bar and looks like it shipped with the Mac.<span class="k">Screenshot from the app</span></div>
+      <div class="caption"><b id="shotcap">Nightfall, 100%. Scroll for sunrise.</b>The real panel, not a mockup. One slider for blue light. One for the keyboard. Presets for the kind of night it is. It lives in the menu bar and looks like it shipped with the Mac.<span class="k">Screenshot from the app</span></div>
     </div>
   </div>
+  <div class="scroll"><span></span>Scroll for sunrise</div>
 </header>
 
 <section id="features"><div class="wrap">
@@ -380,6 +399,32 @@
 </div></footer>
 
 <script>
+  // Scroll is sunrise. t runs 0 → 1 across the hero: the sky drains from full red to neutral dark, the sun rises to
+  // the horizon line, and the product shot — rendered as a screen at Warmth 100 % — gets its blue back.
+  (function(){
+    var root=document.documentElement, hero=document.querySelector('.hero'), hm=document.getElementById('hm'), cap=document.getElementById('shotcap');
+    var red=[200,32,15], deep=[109,12,7], vd=[13,14,17];
+    function mix(a,b,t){return a.map(function(x,i){return Math.round(x+(b[i]-x)*t)})}
+    function ease(t){return t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2}
+    function matrixFor(w){ w=Math.max(0,Math.min(1,w)); var b,g,tint; if(w<=0.6){var q=w/0.6;b=1-q;g=1-0.40*q;tint=0;}else{var u=(w-0.6)/0.4;b=0;g=0.60-0.25*u;tint=0.50*u;}
+      var r0=[(1-tint)+tint*0.2126, tint*0.7152*g, tint*0.0722*b], r1=[0,(1-tint)*g,0], r2=[0,0,(1-tint)*b];
+      return [r0[0],r0[1],r0[2],0,0, r1[0],r1[1],r1[2],0,0, r2[0],r2[1],r2[2],0,0, 0,0,0,1,0].map(function(x){return +x.toFixed(4)}).join(' ');}
+    var ticking=false;
+    function update(){
+      ticking=false;
+      var span=Math.max(300,hero.offsetHeight*0.85);
+      var raw=Math.max(0,Math.min(1,window.scrollY/span)), t=ease(raw);
+      root.style.setProperty('--t',t.toFixed(4));
+      // sky: red → deep red → void, with the shift weighted toward the end so the top of the page stays fully red
+      var c = t<0.55 ? mix(red,deep,t/0.55) : mix(deep,vd,(t-0.55)/0.45);
+      root.style.setProperty('--bg','rgb('+c.join(',')+')');
+      root.style.setProperty('--navbg', t<0.5 ? 'rgba(90,10,6,'+(0.35+0.3*t)+')' : 'rgba(13,14,17,'+(0.4+0.4*(t-0.5)/0.5)+')');
+      hm.setAttribute('values',matrixFor(1-t));
+      if(cap){ var w=Math.round((1-t)*100); cap.textContent = w>90?'Nightfall, 100%. Scroll for sunrise.': w>5?'Sunrise in progress · Warmth '+w+'%':'Sunrise. Warmth off, blue restored.'; }
+    }
+    window.addEventListener('scroll',function(){ if(!ticking){ ticking=true; requestAnimationFrame(update);} },{passive:true});
+    window.addEventListener('resize',update); update();
+  })();
   function curve(w){ w=Math.max(0,Math.min(1,w)); if(w<=0.6){var t=w/0.6;return {b:1-t,g:1-0.40*t,tint:0};} var u=(w-0.6)/0.4; return {b:0,g:0.60-0.25*u,tint:0.50*u}; }
   var wm=document.getElementById('wm'),pct=document.getElementById('pct'),rb=document.getElementById('rb'),rg=document.getElementById('rg'),rt=document.getElementById('rt'),stage=document.getElementById('stage'),slider=document.getElementById('slider');
   function stageText(w){
