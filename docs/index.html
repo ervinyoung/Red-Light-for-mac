@@ -28,7 +28,7 @@
   body{margin:0;background:var(--void);color:var(--snow);font-family:var(--inter);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
   a{color:inherit;text-decoration:none}
   .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
-  h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;margin:0;font-weight:600}
+  h1,h2,h3{font-family:var(--display);margin:0;font-weight:600;letter-spacing:-.015em}
   .btn{display:inline-flex;align-items:center;gap:9px;height:44px;padding:0 22px;border-radius:999px;font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase;border:1px solid transparent;transition:transform .15s,background .15s;white-space:nowrap}
   .btn:hover{transform:translateY(-1px)}
   .btn.white{background:var(--red);color:var(--black);box-shadow:0 0 0 6px rgba(255,0,0,.12)}
@@ -63,7 +63,7 @@
   .hero{position:sticky;top:0;padding:112px 0 0;overflow:hidden;background:var(--void)}
   .hero h1{font-size:clamp(52px,7.6vw,88px);font-weight:700;line-height:1.02;letter-spacing:-.028em}
   .hero h1 .grad{color:var(--ember)}
-  .hero .sub{font-size:clamp(16px,1.8vw,19px);color:var(--mist);max-width:560px;margin:20px 0 26px;line-height:1.5}
+  .hero .sub{font-size:clamp(16px,1.8vw,19px);color:var(--mist);max-width:600px;margin:20px 0 26px;line-height:1.55;letter-spacing:-.005em}
   .hero .ctas{display:flex;gap:12px;flex-wrap:wrap}
   .hero .fine{font-size:12.5px;color:var(--ash);margin-top:14px}
   .shot{position:relative;margin:40px auto 0;max-width:1032px;height:min(56vh,520px);border-radius:18px 18px 0 0;overflow:hidden;border:1px solid rgba(255,255,255,.12);border-bottom:0;filter:url(#hero);
@@ -82,18 +82,18 @@
   /* peer-reviewed numbers, each linked to its paper */
   .sci{padding:64px 0 24px;border-top:0}
   .sci .k{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--red);font-weight:600;margin-bottom:12px}
-  .sci h2{font-size:clamp(34px,4.6vw,54px);font-weight:600;line-height:1.04;letter-spacing:-.025em;max-width:820px}
+  .sci h2{font-size:clamp(34px,4.6vw,54px);font-weight:600;line-height:1.04;letter-spacing:-.024em;max-width:820px}
   .sci .lead{color:var(--grey);font-size:16px;max-width:640px;margin:14px 0 0;line-height:1.55}
   .wall{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:40px}
-  .wall a{display:block;border:1px solid var(--edge);border-radius:18px;padding:24px 22px 20px;background:rgba(255,255,255,.02);transition:border-color .15s,background .15s}
+  .wall a{display:flex;flex-direction:column;height:100%;border:1px solid var(--edge);border-radius:18px;padding:24px 22px 20px;background:rgba(255,255,255,.02);transition:border-color .15s,background .15s}
   .wall a:hover{border-color:var(--edge-red);background:rgba(255,0,0,.04)}
-  .wall .n{font-variant-numeric:tabular-nums;font-family:var(--display);font-weight:700;font-size:clamp(46px,5.2vw,68px);line-height:.95;letter-spacing:-.04em;color:var(--white)}
+  .wall .n{font-family:var(--display);font-weight:700;font-size:clamp(46px,5.2vw,68px);line-height:.95;letter-spacing:-.035em;color:var(--white)}
   .wall .n small{font-size:.42em;color:var(--red);margin-left:2px;letter-spacing:-.02em}
-  .wall .f{margin-top:12px;font-size:14.5px;line-height:1.45;color:var(--white)}
-  .wall .src{margin-top:14px;padding-top:12px;border-top:1px solid var(--edge);font-size:11.5px;letter-spacing:.04em;color:var(--grey-2);line-height:1.5}
+  .wall .f{margin-top:12px;font-size:14.5px;line-height:1.5;color:var(--white);letter-spacing:-.003em}
+  .wall .src{margin-top:auto;padding-top:14px;border-top:1px solid var(--edge);font-size:11.5px;letter-spacing:.04em;color:var(--grey-2);line-height:1.5}
   .wall .src b{color:var(--grey);font-weight:600}
   .pull{margin-top:18px;border:1px solid var(--edge-red);border-radius:18px;padding:26px 28px;display:grid;grid-template-columns:1.4fr 1fr;gap:28px;align-items:center;background:linear-gradient(90deg,rgba(255,0,0,.06),rgba(255,0,0,0))}
-  .pull q{font-family:var(--display);font-weight:700;font-size:clamp(20px,2.3vw,27px);line-height:1.25;letter-spacing:-.02em;quotes:"“" "”"}
+  .pull q{font-family:var(--display);font-weight:600;font-size:clamp(20px,2.2vw,26px);line-height:1.32;letter-spacing:-.016em;quotes:"\201C" "\201D"}
   .pull .by{font-size:12px;color:var(--grey-2);margin-top:10px}
   .pull .by a{color:var(--grey)}
   .pull .ans{font-size:14.5px;color:var(--grey);line-height:1.55;border-left:2px solid var(--red);padding-left:16px}
@@ -107,7 +107,7 @@
   .core{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   .core .card{position:relative;border:1px solid var(--edge);border-radius:20px;padding:28px;min-height:300px;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;background:var(--black)}
   .core .card .k{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--red);font-weight:600}
-  .core .card h3{font-size:clamp(24px,2.4vw,30px);font-weight:600;margin:10px 0 8px;line-height:1.1;letter-spacing:-.02em}
+  .core .card h3{font-size:clamp(24px,2.4vw,30px);font-weight:600;margin:10px 0 8px;line-height:1.12;letter-spacing:-.018em}
   .core .card p{color:var(--mist);font-size:15px;margin:0;line-height:1.55;max-width:440px}
   .core .card .vis{margin-bottom:auto}
   /* 1 · native: the real panel, cropped, in a card that is itself styled like a Control Center row */
@@ -191,10 +191,10 @@
   <h2>The science isn't subtle.</h2>
   <p class="lead">Controlled human studies, published in the journals that matter. Every number below links to the paper it comes from.</p>
   <div class="wall">
-    <a href="https://www.pnas.org/doi/10.1073/pnas.1418490112"><div class="n">55<small>%</small></div><div class="f">less evening melatonin after reading on a light-emitting screen instead of paper.</div><div class="src"><b>Chang, Aeschbach, Duffy &amp; Czeisler</b><br>PNAS · 2015 · Harvard Medical School</div></a>
-    <a href="https://www.pnas.org/doi/10.1073/pnas.1418490112"><div class="n">1.5<small>h</small></div><div class="f">later circadian clock after five evenings on the lit screen, with reduced alertness the next morning.</div><div class="src"><b>Same study</b><br>PNAS · 2015</div></a>
-    <a href="https://doi.org/10.1210/jc.2010-2098"><div class="n">99<small>%</small></div><div class="f">of people had a delayed melatonin onset under ordinary room light before bed. Night, as the body counts it, shortened by about 90 minutes.</div><div class="src"><b>Gooley et al.</b><br>J. Clin. Endocrinol. Metab. · 2011 · n = 116</div></a>
-    <a href="https://doi.org/10.1126/science.1067262"><div class="n">480<small>nm</small></div><div class="f">peak sensitivity of the retinal cells that set your clock. Squarely in the blue that displays emit.</div><div class="src"><b>Berson, Dunn &amp; Takao</b><br>Science · 2002</div></a>
+    <a href="https://www.pnas.org/doi/10.1073/pnas.1418490112"><div class="n">55<small>%</small></div><div class="f">less evening melatonin after reading on a lit screen instead of paper.</div><div class="src"><b>Chang et al.</b><br>PNAS · 2015 · Harvard</div></a>
+    <a href="https://www.pnas.org/doi/10.1073/pnas.1418490112"><div class="n">1.5<small>h</small></div><div class="f">later circadian clock after five such evenings, and a duller next morning.</div><div class="src"><b>Chang et al.</b><br>PNAS · 2015 · Harvard</div></a>
+    <a href="https://doi.org/10.1210/jc.2010-2098"><div class="n">99<small>%</small></div><div class="f">of people had melatonin delayed by ordinary room light before bed.</div><div class="src"><b>Gooley et al.</b><br>JCEM · 2011 · n = 116</div></a>
+    <a href="https://doi.org/10.1126/science.1067262"><div class="n">480<small>nm</small></div><div class="f">peak sensitivity of the retinal cells that set your clock, deep in a display's blue.</div><div class="src"><b>Berson et al.</b><br>Science · 2002</div></a>
   </div>
   <div class="pull">
     <div>
