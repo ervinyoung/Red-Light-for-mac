@@ -205,6 +205,7 @@ final class Model: ObservableObject {
     @Published var recording: String? = nil
     @Published var live = Settings()
     @Published var locationDenied = false
+    var snapshotMode = false
     let overlay = ShadeOverlay()
     let gamma = Gamma()
     let locator = Locator()
@@ -506,9 +507,26 @@ struct SettingsRow: View {
     let text: String
     var body: some View { HStack { Text(text).font(CC.small); Spacer() }.frame(height: 34).padding(.bottom, -2).contentShape(Rectangle()) }
 }
+/// The system switch, or — only while exporting a documentation image — an identical drawing of it.
+struct SwitchView: View {
+    let isOn: Binding<Bool>; var small = false; var drawn = false
+    var body: some View {
+        if drawn {
+            let w: CGFloat = small ? 32 : 38, h: CGFloat = small ? 18 : 22
+            ZStack(alignment: isOn.wrappedValue ? .trailing : .leading) {
+                Capsule().fill(isOn.wrappedValue ? Color.accentColor : Color.primary.opacity(0.18)).frame(width: w, height: h)
+                Circle().fill(.white).frame(width: h - 4, height: h - 4).shadow(color: .black.opacity(0.25), radius: 1, y: 1).padding(2)
+            }
+        } else if small {
+            Toggle("", isOn: isOn).toggleStyle(.switch).labelsHidden().controlSize(.small)
+        } else {
+            Toggle("", isOn: isOn).toggleStyle(.switch).labelsHidden()
+        }
+    }
+}
 struct ToggleRow: View {
-    let label: String; let isOn: Binding<Bool>
-    var body: some View { HStack { Text(label).font(CC.row); Spacer(); Toggle("", isOn: isOn).toggleStyle(.switch).labelsHidden().controlSize(.small) }.frame(height: 32) }
+    let label: String; let isOn: Binding<Bool>; var drawn = false
+    var body: some View { HStack { Text(label).font(CC.row); Spacer(); SwitchView(isOn: isOn, small: true, drawn: drawn) }.frame(height: 32) }
 }
 
 // MARK: - Main panel
@@ -525,7 +543,7 @@ struct Panel: View {
     var mainPage: some View {
         VStack(spacing: 0) {
             TitleBlock(title: "Nightfall", subtitle: subtitle) {
-                Toggle("", isOn: Binding(get: { m.agentRunning }, set: { m.setAgent($0) })).toggleStyle(.switch).labelsHidden()
+                SwitchView(isOn: Binding(get: { m.agentRunning }, set: { m.setAgent($0) }), drawn: m.snapshotMode)
             }
 
             Header(text: "Warmth", value: (m.live.warmth ?? 0) > 0.001 ? fmtPct(m.live.warmth) : "Off")
@@ -627,7 +645,7 @@ struct SettingsPage: View {
             }
 
             Header(text: "Sun")
-            ToggleRow(label: "Switch at Sunset and Sunrise", isOn: Binding(get: { m.agentRunning }, set: { m.setAgent($0) }))
+            ToggleRow(label: "Switch at Sunset and Sunrise", isOn: Binding(get: { m.agentRunning }, set: { m.setAgent($0) }), drawn: m.snapshotMode)
             HStack {
                 Text("Location").font(CC.row); Spacer()
                 Text(locationLabel).font(CC.small).foregroundStyle(.secondary)
@@ -658,7 +676,7 @@ struct SettingsPage: View {
             Line()
 
             Header(text: "Learning")
-            ToggleRow(label: "Adapt to My Adjustments", isOn: Binding(get: { m.config.learning?.enabled ?? true }, set: { var l = m.config.learning ?? Learning(); l.enabled = $0; m.config.learning = l; m.saveConfig(reapply: false) }))
+            ToggleRow(label: "Adapt to My Adjustments", isOn: Binding(get: { m.config.learning?.enabled ?? true }, set: { var l = m.config.learning ?? Learning(); l.enabled = $0; m.config.learning = l; m.saveConfig(reapply: false) }), drawn: m.snapshotMode)
             if m.learned.history.isEmpty {
                 TextRow(text: "Adopts what you keep choosing after three similar nights", secondary: true)
             } else {
@@ -675,7 +693,7 @@ struct SettingsPage: View {
             SectionEnd()
 
             Header(text: "General")
-            ToggleRow(label: "Open at Login", isOn: Binding(get: { m.launchAtLogin }, set: { m.setLaunchAtLogin($0) }))
+            ToggleRow(label: "Open at Login", isOn: Binding(get: { m.launchAtLogin }, set: { m.setLaunchAtLogin($0) }), drawn: m.snapshotMode)
             SectionEnd()
             TextRow(text: "Show Files in Finder").onTapGesture { NSWorkspace.shared.open(appDir) }
             Line()
@@ -704,10 +722,58 @@ func enforceSingleInstance() {
     let others = NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == me.bundleIdentifier && $0.processIdentifier != me.processIdentifier }
     if !others.isEmpty { NSApp.terminate(nil); exit(0) }
 }
+/// `Nightfall --snapshot out.png [settings]` renders the panel to a PNG for documentation, off-screen, in dark
+/// appearance, on a dark backdrop. No screen-recording grant is needed; system glass is not part of the view.
+func snapshotIfRequested() {
+    let args = CommandLine.arguments
+    guard let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count else { return }
+    let out = URL(fileURLWithPath: args[i + 1])
+    let page = args.contains("settings") ? "settings" : "main"
+    let app = NSApplication.shared; app.setActivationPolicy(.prohibited)
+    let model = Model(); model.snapshotMode = true
+    // Let the live values (read through the engine, off the main thread) land before the view first appears,
+    // so every slider and switch is created already showing the real state.
+    model.refresh()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+        model.refresh()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            let host = NSHostingView(rootView: SnapshotRoot(m: model, page: page))
+            host.appearance = NSAppearance(named: .darkAqua)
+            host.frame = NSRect(x: 0, y: 0, width: 303, height: 10)
+            let win = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
+            win.appearance = NSAppearance(named: .darkAqua)
+            win.isOpaque = false; win.backgroundColor = .clear; win.contentView = host; win.orderFront(nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                let size = host.fittingSize
+                host.frame = NSRect(origin: .zero, size: size); win.setContentSize(size)
+                host.layoutSubtreeIfNeeded(); host.display(); win.displayIfNeeded()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.6))   // let AppKit controls settle on their values
+                host.display()
+                let scale: CGFloat = 2
+                let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale), bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+                rep.size = size
+                host.cacheDisplay(in: host.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: out)
+                print("wrote \(out.path) \(rep.pixelsWide)x\(rep.pixelsHigh)")
+                exit(0)
+            }
+        }
+    }
+    app.run()
+}
+struct SnapshotRoot: View {
+    @ObservedObject var m: Model; let page: String
+    var body: some View {
+        Group { if page == "main" { Panel(m: m) } else { SettingsPage(m: m, back: {}) .frame(width: 303) } }
+            .fixedSize(horizontal: false, vertical: true)
+            .background(Color(red: 0.13, green: 0.12, blue: 0.12))   // stands in for the system glass in the export
+    }
+}
+
 @main
 struct NightfallApp: App {
     @StateObject var model = Model()
-    init() { enforceSingleInstance() }
+    init() { snapshotIfRequested(); enforceSingleInstance() }
     var body: some Scene {
         MenuBarExtra {
             Panel(m: model)
