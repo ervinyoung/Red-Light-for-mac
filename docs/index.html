@@ -75,6 +75,21 @@
   .shot .cap b{display:block;font-family:var(--font);font-size:20px;font-weight:700;color:#fff;margin-bottom:4px}
 
   section{padding:64px 0 72px;border-top:1px solid var(--edge)}
+  /* the word from Huberman Lab, verbatim */
+  .huber{padding:56px 0 8px;border-top:0}
+  .huber .q{font-family:var(--font);font-weight:700;font-size:clamp(28px,4vw,46px);line-height:1.08;letter-spacing:-.025em;max-width:900px}
+  .huber .q em{font-style:normal;color:var(--red)}
+  .huber .who{margin-top:16px;font-size:13px;color:var(--grey-2)}
+  .huber .who a{color:var(--grey);border-bottom:1px solid var(--edge)}
+  .huber .row{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:34px}
+  .huber .row div{border-left:2px solid var(--red-50);padding-left:14px}
+  .huber .row p{margin:0;font-size:14.5px;line-height:1.5;color:var(--grey)}
+  .huber .row p b{display:block;color:var(--white);font-weight:600;margin-bottom:4px;font-size:15px}
+  /* the native card shows the measurements instead of a second screenshot */
+  .specs{width:100%;max-width:420px;border:1px solid var(--edge);border-radius:16px;padding:6px 14px 4px;background:rgba(255,255,255,.02);margin-bottom:26px}
+  .specs div{display:flex;justify-content:space-between;align-items:center;height:32px;font-size:13px;color:var(--grey);border-top:1px solid var(--edge)}
+  .specs div:first-child{border-top:0;height:36px;font-size:15px;font-weight:700;color:var(--white)}
+  .specs div b{color:var(--white);font-weight:600;font-variant-numeric:tabular-nums}
   .core{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   .core .card{position:relative;border:1px solid var(--edge);border-radius:20px;padding:28px;min-height:300px;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;background:var(--black)}
   .core .card .k{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--red);font-weight:600}
@@ -83,6 +98,7 @@
   .core .card .vis{margin-bottom:auto}
   /* 1 · native: the real panel, cropped, in a card that is itself styled like a Control Center row */
   .core .native{grid-column:1 / -1;flex-direction:row;align-items:flex-end;gap:32px;min-height:0;padding-right:0;padding-top:0}
+  .core .native .specs{margin-bottom:0}
   .core .native .txt{flex:1;padding:28px 0 4px}
   .core .native .frame{width:303px;height:400px;flex:none;align-self:flex-end;overflow:hidden;border-radius:22px 0 0 0;box-shadow:0 0 0 .5px rgba(255,255,255,.14) inset,-10px 0 40px rgba(0,0,0,.6);margin-top:28px;
     -webkit-mask:linear-gradient(180deg,#000 82%,transparent);mask:linear-gradient(180deg,#000 82%,transparent)}
@@ -106,7 +122,7 @@
   footer .wrap{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px}
   footer a{color:var(--mist)}footer a:hover{color:var(--ember)}
   @media (prefers-reduced-motion:reduce){.field,.rim{display:none}.reveal{height:auto}.hero{position:relative}}
-  @media (max-width:860px){.core{grid-template-columns:1fr}.core .native{flex-direction:column;align-items:flex-start;padding-right:28px}.core .native .frame{width:100%;border-radius:22px}.panel{right:12px;width:270px}.shot{height:440px}.shot .cap{display:none}nav .line{display:none}}
+  @media (max-width:860px){.huber .row{grid-template-columns:1fr}.core{grid-template-columns:1fr}.core .native{flex-direction:column;align-items:flex-start;padding-right:28px}.core .native .frame{width:100%;border-radius:22px}.panel{right:12px;width:270px}.shot{height:440px}.shot .cap{display:none}nav .line{display:none}}
 </style>
 </head>
 <body>
@@ -156,11 +172,28 @@
 </header>
 </div>
 
+<section class="huber"><div class="wrap">
+  <p class="q">“Avoid viewing bright lights—especially bright overhead lights between <em>10&nbsp;pm and 4&nbsp;am</em>.”</p>
+  <div class="who">Andrew Huberman, <a href="https://www.hubermanlab.com/newsletter/toolkit-for-sleep">Huberman Lab · Toolkit for Sleep</a>. Midnight applies it to the brightest light in the room: your screen.</div>
+  <div class="row">
+    <div><p><b>“Bright light powerfully inhibits melatonin.”</b>Huberman Lab, <a href="https://www.hubermanlab.com/newsletter/using-light-for-health" style="color:var(--grey-2)">Using Light for Health</a></p></div>
+    <div><p><b>“Try to use amber or red light (longer wavelengths), as this type of light more minimally impacts melatonin levels.”</b>Same newsletter. Red Shift at 60% is exactly that: zero blue, and it keeps going.</p></div>
+    <div><p><b>“Limiting bright screens and artificial light before bed helps signal to your body that it's time to wind down.”</b>Toolkit for Sleep. Midnight does it at sunset, automatically, every night.</p></div>
+  </div>
+</div></section>
+
 <section><div class="wrap">
   <div class="core">
     <div class="card native">
-      <div class="txt"><div class="k">Native</div><h3>Indistinguishable from Control Center.</h3><p>Measured from Apple's own panels to the point: the same rows, sliders and glass. Nothing new to learn, nothing that looks bolted on. It's the panel that should have shipped with the Mac, one click from the menu bar.</p></div>
-      <div class="frame"><img src="img/panel.png" alt="The Midnight panel: Warmth, Screen Shade, Keyboard Backlight and presets, in the style of Control Center"></div>
+      <div class="txt"><div class="k">Native</div><h3>Indistinguishable from Control Center.</h3><p>Measured from Apple's own panels to the point, then built from the system's own controls. Nothing new to learn, nothing that looks bolted on. It's the panel that should have shipped with the Mac, one click from the menu bar.</p></div>
+      <div class="specs" style="align-self:flex-end;margin:26px 28px 0 0">
+        <div><span>Measured from Control Center</span><b>at 2×</b></div>
+        <div><span>Panel width</span><b>304 pt</b></div>
+        <div><span>Rows · icon circles</span><b>32 pt · 26 pt</b></div>
+        <div><span>Title · label type</span><b>15 · 13 pt</b></div>
+        <div><span>Sliders · switches</span><b>system controls</b></div>
+        <div><span>Surface</span><b>Liquid Glass</b></div>
+      </div>
     </div>
     <div class="card">
       <div class="vis"><div class="ramp"><i></i><b>60% · blue at zero</b><small class="l">Off</small><small class="r">100%</small></div></div>
