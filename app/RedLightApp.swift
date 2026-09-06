@@ -201,11 +201,14 @@ final class Model: ObservableObject {
     @Published var shade = Shade()
     @Published var sunLine = ""
     @Published var agentRunning = false
+    @Published var enabled = false          // what the switch shows; set optimistically, then confirmed
+    private var enabledPending = false
     @Published var launchAtLogin = false
     @Published var recording: String? = nil
     @Published var live = Settings()
     @Published var locationDenied = false
     var snapshotMode = false
+    var snapshotDaylight = false      // --snapshot … daylight, to capture the daytime state
     let overlay = ShadeOverlay()
     let gamma = Gamma()
     let locator = Locator()
@@ -268,7 +271,8 @@ final class Model: ObservableObject {
             let sun = cli("suntimes").trimmingCharacters(in: .whitespacesAndNewlines)
             let status = cli("status")
             let running = runStatus("/bin/launchctl", ["print", "gui/\(getuid())/\(agentLabel)"]).ok
-            DispatchQueue.main.async { guard let self = self else { return }; self.sunLine = sun; self.parseLive(status); self.agentRunning = running }
+            DispatchQueue.main.async { guard let self = self else { return }; self.sunLine = sun; self.parseLive(status); self.agentRunning = running
+                if !self.enabledPending { self.enabled = running } }
         }
     }
     var isNight: Bool { state?.mode == "night" }
@@ -311,9 +315,24 @@ final class Model: ObservableObject {
         set("warmth", w <= 0 ? "off" : String(format: "%.1f", w * 100), final: final)
     }
     func setAgent(_ on: Bool) {
+        enabled = on                        // the switch moves under the finger, not a second later
+        enabledPending = true
         let plist = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(agentLabel).plist").path
-        if on { _ = runStatus("/bin/launchctl", ["bootstrap", "gui/\(getuid())", plist]) } else { _ = runStatus("/bin/launchctl", ["bootout", "gui/\(getuid())/\(agentLabel)"]) }
-        scheduleRefresh(after: 0.4)
+        liveQueue.async { [weak self] in
+            guard let self = self else { return }
+            if on {
+                _ = runStatus("/bin/launchctl", ["bootstrap", "gui/\(getuid())", plist])
+                _ = runStatus(cliURL.path, ["resume"])      // clears any pause and applies the look this hour calls for
+            } else {
+                _ = runStatus("/bin/launchctl", ["bootout", "gui/\(getuid())/\(agentLabel)"])
+                _ = runStatus(cliURL.path, ["day"])         // hand the normal display back straight away
+            }
+            let ok = runStatus("/bin/launchctl", ["print", "gui/\(getuid())/\(agentLabel)"]).ok
+            DispatchQueue.main.async {
+                self.agentRunning = ok; self.enabled = ok; self.enabledPending = false
+                self.scheduleRefresh(after: 0.05)
+            }
+        }
     }
     func setLaunchAtLogin(_ on: Bool) {
         guard #available(macOS 13, *) else { return }
@@ -409,7 +428,11 @@ enum CC {
     static let secondary = Color(nsColor: .secondaryLabelColor)
     static let sep       = Color(nsColor: .separatorColor)
     static let circle    = Color(nsColor: .quaternaryLabelColor)
-    static let symbol    = Color(nsColor: .labelColor)
+    static let symbol    = Color(nsColor: .secondaryLabelColor)
+    /// The panel's own surface, used to wash out the controls behind the daylight notice.
+    static let scrim = Color(nsColor: NSColor(name: nil) {
+        $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 0.13, alpha: 0.86) : NSColor(white: 0.97, alpha: 0.86)
+    })
 }
 struct Step: Identifiable { let label: String; let value: Double?; var id: String { label } }
 // Denser above the 60 % knee, where blue is already gone and each step is a different feel of red.
@@ -541,7 +564,7 @@ struct TextRow: View {
 }
 struct SettingsRow: View {
     let text: String
-    var body: some View { HStack { Text(text).font(CC.small).foregroundStyle(CC.label); Spacer() }.frame(height: 30).padding(.bottom, 8).contentShape(Rectangle()) }
+    var body: some View { HStack { Text(text).font(CC.small).foregroundStyle(CC.label); Spacer() }.frame(height: 30).padding(.bottom, 1.5).contentShape(Rectangle()) }
 }
 /// The system switch, or — only while exporting a documentation image — an identical drawing of it.
 struct SwitchView: View {
@@ -590,12 +613,45 @@ struct Panel: View {
         .frame(width: 303)
         .onAppear { m.refresh() }
     }
+    // Daylight: the controls are behind glass, because nothing is being applied until the sun goes down.
+    // The title and its switch stay live so the app can still be turned off; one tap clears the glass.
+    @State private var overlayDismissed = false
+    var daylight: Bool { m.snapshotDaylight || (!m.isNight && !overlayDismissed && !m.snapshotMode) }
+
     var mainPage: some View {
         VStack(spacing: 0) {
             TitleBlock(title: "Red Light", subtitle: subtitle) {
-                SwitchView(isOn: Binding(get: { m.agentRunning }, set: { m.setAgent($0) }), drawn: m.snapshotMode)
+                SwitchView(isOn: Binding(get: { m.enabled }, set: { m.setAgent($0) }), drawn: m.snapshotMode)
             }
+            ZStack {
+                controls
+                    .blur(radius: daylight ? 9 : 0)
+                    .opacity(daylight ? 0.4 : 1)
+                    .allowsHitTesting(!daylight)
+                if daylight { daylightNotice }
+            }
+            .animation(.easeInOut(duration: 0.18), value: daylight)
+        }
+        .padding(.horizontal, CC.side)
+        .onChange(of: m.isNight) { night in if night { overlayDismissed = false } }
+    }
 
+    var daylightNotice: some View {
+        VStack(spacing: 3) {
+            Text("Waiting for sunset").font(CC.title).foregroundStyle(CC.label)
+            Text(m.enabled ? (m.sunsetText.isEmpty ? "Red Light starts at sunset" : "Red Light starts at \(m.sunsetText)")
+                           : "Turn on above to start at sunset")
+                .font(CC.subtitle).foregroundStyle(CC.secondary)
+            Text("Tap to use it anyway").font(CC.subtitle).foregroundStyle(Color(nsColor: .tertiaryLabelColor)).padding(.top, 6)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(CC.scrim)
+        .contentShape(Rectangle())
+        .onTapGesture { overlayDismissed = true }
+    }
+
+    @ViewBuilder var controls: some View {
+        VStack(spacing: 0) {
             Header(text: "Red Shift", value: (m.live.warmth ?? 0) > 0.001 ? fmtPct(m.live.warmth) : "Off")
             SliderRow(minIcon: "sun.max", maxIcon: "moon.fill", steps: warmSteps, current: m.live.warmth, isOn: (m.live.warmth ?? 0) > 0.001) { s, final in
                 m.setWarmth(s.value ?? 0, final: final) }
@@ -631,7 +687,7 @@ struct Panel: View {
             saveRow.padding(.top, 4)
             SectionEnd()
 
-            if m.agentRunning {
+            if m.enabled {
                 Header(text: m.isPaused ? "Paused" : "Pause")
                 if m.isPaused {
                     IconRow(icon: "play.fill", label: "Resume Red Light").onTapGesture { m.resume() }
@@ -644,7 +700,6 @@ struct Panel: View {
 
             SettingsRow(text: "Red Light Settings…").onTapGesture { page = "settings" }
         }
-        .padding(.horizontal, CC.side)
     }
     var subtitle: String {
         if m.isPaused && !m.snapshotMode, let u = m.state?.pausedUntil {
@@ -780,7 +835,7 @@ func snapshotIfRequested() {
     let out = URL(fileURLWithPath: args[i + 1])
     let page = args.contains("settings") ? "settings" : "main"
     let app = NSApplication.shared; app.setActivationPolicy(.prohibited)
-    let model = Model(); model.snapshotMode = true
+    let model = Model(); model.snapshotMode = true; model.snapshotDaylight = args.contains("daylight")
     // Let the live values (read through the engine, off the main thread) land before the view first appears,
     // so every slider and switch is created already showing the real state.
     model.refresh()

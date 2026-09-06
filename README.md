@@ -88,6 +88,12 @@ most once a day. `learned.json` holds what it adopted and a dated history; `redl
     redlight.log    transitions, noticed changes, learned adjustments
     legacy/          the previous SunsetMode install, archived
 
+## The switch and daylight
+The switch at the top right is the master switch, and means what the Wi-Fi switch means. Off restores your
+normal display straight away and nothing happens at sunset; on follows the sun again and clears any pause.
+During the day the controls sit behind glass with "Waiting for sunset" and the time it will start — one tap
+clears it if you want to use red light before then.
+
 ## Menu bar app
 Icon: the sun at the horizon — outline by day, filled at night, a pause badge while paused.
 Panel: Warmth · Screen Shade · Keyboard Backlight · Turn Off After Inactivity (sliders snap to detents and
