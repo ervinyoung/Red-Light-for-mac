@@ -1,10 +1,12 @@
 # tools
 
-`hero.swift` builds `docs/img/hero.png`. It composites the app's own pixels over generated artwork:
-
-1. `Red Light.app --snapshot panel-clear.png clear` exports the panel with a transparent backdrop.
-2. The artwork is drawn from `rgb(r, g, 0)` only, so the background carries no blue at all.
-3. The area behind the panel is Gaussian-blurred, its saturation lifted, and a dark scrim laid over it,
-   which is what the system's glass does, so the panel really is translucent over the art.
+`hero.swift` builds `docs/img/hero.png`: the app's own panel screenshot on a black-and-red field.
 
     swiftc -O hero.swift -o hero && ./hero
+
+`hero-glass.swift` is an alternative that composites the panel over generated artwork with a real
+blurred backdrop, so the pane is genuinely translucent. It needs a transparent panel export first:
+
+    "Red Light.app/Contents/MacOS/RedLight" --snapshot panel-clear.png clear
+
+Both draw every background colour from `rgb(r, g, 0)`, so the artwork carries no blue at all.

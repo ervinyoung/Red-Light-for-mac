@@ -485,8 +485,30 @@ struct IconRow: View {
         .frame(height: 32).contentShape(Rectangle())
     }
 }
+/// Where a real value sits on a detented track, interpolated between stops. The thumb and the preset ticks
+/// share it, so a preset's mark lands exactly where its thumb comes to rest when you apply it.
+func trackPosition(_ steps: [Step], value: Double?, isOn: Bool) -> Double {
+    let offIndex = Double(steps.firstIndex { $0.value == nil } ?? 0)
+    let vs = steps.compactMap { $0.value }.filter { $0 > 0 }
+    let useLog = (vs.max() ?? 1) / (vs.min() ?? 1) > 20
+    guard isOn, let v = value, v > 0 else { return offIndex }
+    let marks: [(Double, Double)] = steps.enumerated().compactMap { i, s in s.value.map { (Double(i), $0) } }
+    guard let first = marks.first, let last = marks.last else { return offIndex }
+    if v <= first.1 { return offIndex + (first.0 - offIndex) * max(0, min(1, v / first.1)) }
+    if v >= last.1 { return last.0 }
+    for k in 0..<(marks.count - 1) {
+        let (i0, v0) = marks[k], (i1, v1) = marks[k + 1]
+        if v >= v0 && v <= v1 {
+            let t = useLog ? (log(v) - log(v0)) / (log(v1) - log(v0)) : (v - v0) / (v1 - v0)
+            return i0 + (i1 - i0) * t
+        }
+    }
+    return last.0
+}
+
 struct GlassSlider: View {
     let minIcon: String; let maxIcon: String; let steps: [Step]; let current: Double?; let isOn: Bool
+    var ticks: [Double] = []          // positions of the saved presets on this track
     let onChange: (Step, Bool) -> Void
     // The thumb is *derived* from `current` on every render. Only while the user is actually moving it does a
     // local override take over, and that override can never get stuck: it ends on AppKit's editing callback, or
@@ -494,33 +516,29 @@ struct GlassSlider: View {
     @State private var dragIdx: Double? = nil
     @State private var lastSent = -1
     @State private var settle: DispatchWorkItem? = nil
-    private var offIndex: Double { Double(steps.firstIndex { $0.value == nil } ?? 0) }
-    private var useLog: Bool {
-        let v = steps.compactMap { $0.value }.filter { $0 > 0 }
-        guard let lo = v.min(), let hi = v.max(), lo > 0 else { return false }
-        return hi / lo > 20
-    }
-    private var truePosition: Double {
-        guard isOn, let v = current, v > 0 else { return offIndex }
-        let marks: [(Double, Double)] = steps.enumerated().compactMap { i, s in s.value.map { (Double(i), $0) } }
-        guard let first = marks.first, let last = marks.last else { return offIndex }
-        if v <= first.1 { return offIndex + (first.0 - offIndex) * max(0, min(1, v / first.1)) }
-        if v >= last.1 { return last.0 }
-        for k in 0..<(marks.count - 1) {
-            let (i0, v0) = marks[k], (i1, v1) = marks[k + 1]
-            if v >= v0 && v <= v1 {
-                let t = useLog ? (log(v) - log(v0)) / (log(v1) - log(v0)) : (v - v0) / (v1 - v0)
-                return i0 + (i1 - i0) * t
-            }
-        }
-        return last.0
-    }
+    private var truePosition: Double { trackPosition(steps, value: current, isOn: isOn) }
     private func finish() {
         settle?.cancel(); settle = nil
         guard let v = dragIdx else { return }
         let i = Int(v.rounded())
         dragIdx = nil; lastSent = -1
         onChange(steps[i], true)
+    }
+    /// A mark under the track for every preset, at the point its thumb would land.
+    @ViewBuilder private var tickMarks: some View {
+        if !ticks.isEmpty {
+            GeometryReader { geo in
+                let knob: CGFloat = 20                        // the .regular knob; the track insets by half of it
+                let span = max(1, geo.size.width - knob)
+                let last = Double(max(1, steps.count - 1))
+                ForEach(Array(ticks.enumerated()), id: \.offset) { _, pos in
+                    Capsule()
+                        .fill(Color(nsColor: .tertiaryLabelColor))
+                        .frame(width: 1.5, height: 3)
+                        .position(x: knob / 2 + span * CGFloat(pos / last), y: geo.size.height + 3.5)
+                }
+            }
+        }
     }
     var body: some View {
         let position = Binding<Double>(
@@ -538,14 +556,16 @@ struct GlassSlider: View {
             Image(systemName: minIcon).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 18)
             Slider(value: position, in: 0...Double(max(1, steps.count - 1))) { editing in if !editing { finish() } }
                 .controlSize(.regular)      // Control Center's knob is 20 pt; .large draws 24
+                .overlay(alignment: .bottom) { tickMarks }
             Image(systemName: maxIcon).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 18)
         }
     }
 }
 struct SliderRow: View {
     let minIcon: String; let maxIcon: String; let steps: [Step]; let current: Double?; let isOn: Bool
+    var ticks: [Double] = []
     let onChange: (Step, Bool) -> Void
-    var body: some View { GlassSlider(minIcon: minIcon, maxIcon: maxIcon, steps: steps, current: current, isOn: isOn, onChange: onChange).frame(height: 32) }
+    var body: some View { GlassSlider(minIcon: minIcon, maxIcon: maxIcon, steps: steps, current: current, isOn: isOn, ticks: ticks, onChange: onChange).frame(height: 32) }
 }
 struct SectionEnd: View { var body: some View { Line().padding(.top, 5.5) } }
 struct TextRow: View {
@@ -618,6 +638,17 @@ struct Panel: View {
     @State private var overlayDismissed = false
     var daylight: Bool { m.snapshotDaylight || (!m.isNight && !overlayDismissed && !m.snapshotMode) }
 
+    /// Where each saved preset sits on a given track, so the sliders show what is available at a glance.
+    func presetTicks(_ steps: [Step], _ read: (Settings) -> (Double?, Bool)) -> [Double] {
+        var seen: Set<Int> = []
+        return (m.config.presets ?? []).compactMap { p in
+            let (v, on) = read(p.settings)
+            let pos = trackPosition(steps, value: v, isOn: on)
+            let key = Int((pos * 100).rounded())        // one mark where two presets coincide
+            return seen.insert(key).inserted ? pos : nil
+        }
+    }
+
     var mainPage: some View {
         VStack(spacing: 0) {
             TitleBlock(title: "Red Light", subtitle: subtitle) {
@@ -653,20 +684,24 @@ struct Panel: View {
     @ViewBuilder var controls: some View {
         VStack(spacing: 0) {
             Header(text: "Red Shift", value: (m.live.warmth ?? 0) > 0.001 ? fmtPct(m.live.warmth) : "Off")
-            SliderRow(minIcon: "sun.max", maxIcon: "moon.fill", steps: warmSteps, current: m.live.warmth, isOn: (m.live.warmth ?? 0) > 0.001) { s, final in
+            SliderRow(minIcon: "sun.max", maxIcon: "moon.fill", steps: warmSteps, current: m.live.warmth, isOn: (m.live.warmth ?? 0) > 0.001,
+                      ticks: presetTicks(warmSteps) { ($0.warmth, ($0.warmth ?? 0) > 0.001) }) { s, final in
                 m.setWarmth(s.value ?? 0, final: final) }
             SectionEnd()
 
             Header(text: "Screen Shade", value: m.shade.enabled ? fmtPct(m.shade.level) : "Off")
-            SliderRow(minIcon: "sun.max", maxIcon: "circle.lefthalf.filled", steps: shadeSteps, current: m.shade.level, isOn: m.shade.enabled) { s, _ in
+            SliderRow(minIcon: "sun.max", maxIcon: "circle.lefthalf.filled", steps: shadeSteps, current: m.shade.level, isOn: m.shade.enabled,
+                      ticks: presetTicks(shadeSteps) { ($0.shadeLevel, $0.shadeEnabled == true) }) { s, _ in
                 if let v = s.value { m.setShade(enabled: true, level: v) } else { m.setShade(enabled: false) } }
             SectionEnd()
 
             Header(text: "Keyboard Backlight", value: (m.live.keyboardBrightness ?? 0) > 0 ? fmtPct(m.live.keyboardBrightness) : "Off")
-            SliderRow(minIcon: "light.min", maxIcon: "light.max", steps: keySteps, current: m.live.keyboardBrightness, isOn: (m.live.keyboardBrightness ?? 0) > 0) { s, final in
+            SliderRow(minIcon: "light.min", maxIcon: "light.max", steps: keySteps, current: m.live.keyboardBrightness, isOn: (m.live.keyboardBrightness ?? 0) > 0,
+                      ticks: presetTicks(keySteps) { ($0.keyboardBrightness, ($0.keyboardBrightness ?? 0) > 0) }) { s, final in
                 m.set("keyboard", s.value.map { String($0 * 100) } ?? "off", final: final) }
             Header(text: "Turn Off After Inactivity", value: fmtSeconds(m.live.keyboardIdleDimSeconds))
-            SliderRow(minIcon: "timer", maxIcon: "clock", steps: idleSteps, current: m.live.keyboardIdleDimSeconds, isOn: true) { s, final in
+            SliderRow(minIcon: "timer", maxIcon: "clock", steps: idleSteps, current: m.live.keyboardIdleDimSeconds, isOn: true,
+                      ticks: presetTicks(idleSteps) { ($0.keyboardIdleDimSeconds, true) }) { s, final in
                 m.set("idle", String(Int(s.value ?? 5)), final: final) }
             SectionEnd()
 

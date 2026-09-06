@@ -6,7 +6,7 @@
 Zero blue light after sunset, on your Mac. Blue light after dark is the cheapest sleep loss you are still paying for:
 it holds melatonin down and pushes your clock later. Red Light drives the display's blue channel to zero at sunset,
 holds deep, true reds through the night, dims the keyboard below the system floor, and hands the day back at sunrise.
-In a panel indistinguishable from Control Center. Free, open source, on-device, and it learns what you keep choosing.
+A native macOS 27 menu bar panel. Free, open source, on-device, and it learns what you keep choosing.
 
 Site: https://ervinyoung.github.io/Red-Light-for-mac
 
@@ -87,6 +87,10 @@ most once a day. `learned.json` holds what it adopted and a dated history; `redl
     commanded.json   the keyboard brightness last set (the hardware reports 0 once it idle-dims)
     redlight.log    transitions, noticed changes, learned adjustments
     legacy/          the previous SunsetMode install, archived
+
+## Preset ticks
+Each slider carries a small mark under the track for every saved preset, at the exact point that preset's
+thumb comes to rest. Presets that share a value share one mark.
 
 ## The switch and daylight
 The switch at the top right is the master switch, and means what the Wi-Fi switch means. Off restores your
