@@ -3,8 +3,10 @@
 </p>
 
 # Midnight
-Warm light after dark. Midnight eases your Mac into a low-blue-light look at sunset and back at sunrise,
-dims the keyboard further than the slider allows, and quietly learns what you keep choosing.
+Zero blue light after sunset, on your Mac. Blue light after dark is the cheapest sleep loss you are still paying for:
+it holds melatonin down and pushes your clock later. Midnight drives the display's blue channel to zero at sunset,
+holds deep, true reds through the night, dims the keyboard below the system floor, and hands the day back at sunrise.
+In a panel indistinguishable from Control Center. Free, open source, on-device, and it learns what you keep choosing.
 
 Site: https://ervinyoung.github.io/midnight
 
@@ -38,14 +40,14 @@ Make a shortcut once:
     midnight curve               print the warmth curve
 `sunmode` still works as an alias of `midnight`.
 
-## Warmth: one slider, two mechanisms
+## Red Shift: one slider, two mechanisms
 Two ways to cut blue light have opposite strengths. Scaling the display's blue and green channels at the
 gamma table (what Night Shift and f.lux do) physically removes blue while every pixel keeps its brightness
 ordering, so text stays crisp — but it cannot go "beyond zero", and content that lives only in a removed
 channel goes dark. Apple's Color Tint filter maps each pixel to its luminance and mixes toward red: nothing
 disappears, but hue collapses, and at high intensity everything is the same red blob.
 
-Midnight's Warmth uses each where it is best:
+Midnight's Red Shift (`warmth` in the config and CLI) uses each where it is best:
     0–60 %    channel scaling only: blue 100 % → 0, green trimmed to 60 %. Maximum legibility.
     60–100 %  blue stays at zero; green eases to 35 % while a modest luminance-preserving tint (up to 50 %)
               folds the removed green back into red brightness instead of letting it fade to black.

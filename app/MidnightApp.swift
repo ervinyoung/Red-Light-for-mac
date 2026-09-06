@@ -576,8 +576,8 @@ struct Panel: View {
                 SwitchView(isOn: Binding(get: { m.agentRunning }, set: { m.setAgent($0) }), drawn: m.snapshotMode)
             }
 
-            Header(text: "Warmth", value: (m.live.warmth ?? 0) > 0.001 ? fmtPct(m.live.warmth) : "Off")
-            SliderRow(minIcon: "sun.max", maxIcon: "sunset.fill", steps: warmSteps, current: m.live.warmth, isOn: (m.live.warmth ?? 0) > 0.001) { s, final in
+            Header(text: "Red Shift", value: (m.live.warmth ?? 0) > 0.001 ? fmtPct(m.live.warmth) : "Off")
+            SliderRow(minIcon: "sun.max", maxIcon: "moon.fill", steps: warmSteps, current: m.live.warmth, isOn: (m.live.warmth ?? 0) > 0.001) { s, final in
                 m.setWarmth(s.value ?? 0, final: final) }
             SectionEnd()
 
@@ -627,7 +627,7 @@ struct Panel: View {
         .padding(.horizontal, CC.side)
     }
     var subtitle: String {
-        if m.isPaused, let u = m.state?.pausedUntil {
+        if m.isPaused && !m.snapshotMode, let u = m.state?.pausedUntil {
             let f = DateFormatter(); f.timeStyle = .short; return "Paused until \(f.string(from: u))"
         }
         guard m.agentRunning else { return "Manual" }

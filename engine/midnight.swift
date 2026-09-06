@@ -397,7 +397,7 @@ func learn(cfg: Config, learned: Learned, state: inout State, now: Date) -> Lear
     }
     if let v = settledNightValue("warmth", tol: 0.1) {
         let cur = learned.nightWarmth ?? cfg.night.warmth ?? 0
-        if abs(v - cur) > 0.05 { new.nightWarmth = v; notes.append(String(format: "night warmth %.0f%%", v * 100)) }
+        if abs(v - cur) > 0.05 { new.nightWarmth = v; notes.append(String(format: "night red shift %.0f%%", v * 100)) }
     }
     if let v = settledNightValue("keyboardBrightness", tol: 0.05) {
         let cur = learned.nightKeyboardBrightness ?? cfg.night.keyboardBrightness ?? 0
@@ -691,7 +691,7 @@ case "status":
     print(String(format: "location: %.3f, %.3f (%@)   fade: %.0f min", cfg.latitude, cfg.longitude, cfg.locationSource ?? "unknown", fadeMinutes))
 case "learned":
     print("sunset offset: \(Int(learned.sunsetOffsetMinutes)) min   sunrise offset: \(Int(learned.sunriseOffsetMinutes)) min")
-    if let v = learned.nightWarmth { print(String(format: "night warmth: %.0f%%", v * 100)) }
+    if let v = learned.nightWarmth { print(String(format: "night red shift: %.0f%%", v * 100)) }
     if let v = learned.nightKeyboardBrightness { print(String(format: "night keyboard brightness: %.3f", v)) }
     if let v = learned.nightIdleDimSeconds { print("night idle-off: \(Int(v))s") }
     if let v = learned.nightShadeLevel { print(String(format: "night screen shade: %.0f%%", v * 100)) }
