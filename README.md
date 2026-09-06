@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://ervinyoung.github.io/red-light-for-mac/"><img src="docs/img/hero.png" alt="Red Light for Mac — Zero blue. Sleep better. The Red Light panel in the macOS menu bar." width="100%"></a>
+  <a href="https://ervinyoung.github.io/Red-Light-for-mac/"><img src="docs/img/hero.png" alt="Red Light for Mac — Zero blue. Sleep better. The Red Light panel in the macOS menu bar." width="100%"></a>
 </p>
 
 # Red Light
@@ -8,7 +8,7 @@ it holds melatonin down and pushes your clock later. Red Light drives the displa
 holds deep, true reds through the night, dims the keyboard below the system floor, and hands the day back at sunrise.
 In a panel indistinguishable from Control Center. Free, open source, on-device, and it learns what you keep choosing.
 
-Site: https://ervinyoung.github.io/red-light-for-mac
+Site: https://ervinyoung.github.io/Red-Light-for-mac
 
 ## The science
 Controlled human studies, each linked to its paper:
@@ -22,7 +22,7 @@ Red Light for Mac is not a medical device and makes no medical claims.
 ## Install
 Apple silicon Mac, macOS 26 or later, Xcode Command Line Tools (`xcode-select --install`).
 
-    git clone https://github.com/ervinyoung/red-light-for-mac && cd red-light-for-mac && ./install.sh
+    git clone https://github.com/ervinyoung/Red-Light-for-mac && cd Red-Light-for-mac && ./install.sh
 
 The installer builds the engine and the menu bar app from source, seeds a config, and starts the sunrise/sunset agent.
 Everything then lives in `~/Library/Application Support/RedLight`; the menu bar app is `~/Applications/Red Light.app`.
