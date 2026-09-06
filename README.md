@@ -1,3 +1,7 @@
+<p align="center">
+  <a href="https://ervinyoung.github.io/midnight/"><img src="docs/img/hero.png" alt="Midnight — Zero blue. Sleep better. The Midnight panel in the macOS menu bar." width="100%"></a>
+</p>
+
 # Midnight
 Warm light after dark. Midnight eases your Mac into a low-blue-light look at sunset and back at sunrise,
 dims the keyboard further than the slider allows, and quietly learns what you keep choosing.
