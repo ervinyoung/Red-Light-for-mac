@@ -1,15 +1,15 @@
 #!/bin/zsh
-# Nightfall installer: builds the engine and the menu bar app from source, seeds a config, starts the agent.
+# Midnight installer: builds the engine and the menu bar app from source, seeds a config, starts the agent.
 # Requires: Apple silicon Mac, macOS 26 or later, Xcode Command Line Tools (xcode-select --install).
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
-DIR="$HOME/Library/Application Support/Nightfall"
+DIR="$HOME/Library/Application Support/Midnight"
 mkdir -p "$DIR/gui" "$HOME/Library/LaunchAgents" "$HOME/Applications"
 echo "→ building engine"
-cp "$HERE/engine/nightfall.swift" "$DIR/nightfall.swift"
-swiftc -O "$DIR/nightfall.swift" -o "$DIR/nightfall"
+cp "$HERE/engine/midnight.swift" "$DIR/midnight.swift"
+swiftc -O "$DIR/midnight.swift" -o "$DIR/midnight"
 echo "→ building app"
-cp "$HERE/app/NightfallApp.swift" "$HERE/app/Info.plist" "$HERE/app/build.sh" "$DIR/gui/"
+cp "$HERE/app/MidnightApp.swift" "$HERE/app/Info.plist" "$HERE/app/build.sh" "$DIR/gui/"
 chmod +x "$DIR/gui/build.sh"; "$DIR/gui/build.sh"
 if [ ! -f "$DIR/config.json" ]; then
   echo "→ writing default config (location will be resolved by the app; edit config.json to override)"
@@ -35,23 +35,23 @@ if [ ! -f "$DIR/config.json" ]; then
 JSON
 fi
 echo "→ installing the sunrise/sunset agent"
-PLIST="$HOME/Library/LaunchAgents/com.ervinyoung.nightfall.plist"
+PLIST="$HOME/Library/LaunchAgents/com.ervinyoung.midnight.plist"
 cat > "$PLIST" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>com.ervinyoung.nightfall</string>
-  <key>ProgramArguments</key><array><string>$DIR/nightfall</string><string>check</string></array>
+  <key>Label</key><string>com.ervinyoung.midnight</string>
+  <key>ProgramArguments</key><array><string>$DIR/midnight</string><string>check</string></array>
   <key>RunAtLoad</key><true/>
   <key>StartInterval</key><integer>60</integer>
   <key>StandardOutPath</key><string>$DIR/launchd.out.log</string>
   <key>StandardErrorPath</key><string>$DIR/launchd.err.log</string>
 </dict></plist>
 PL
-launchctl bootout "gui/$(id -u)/com.ervinyoung.nightfall" 2>/dev/null || true
+launchctl bootout "gui/$(id -u)/com.ervinyoung.midnight" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
-ln -sf "$DIR/nightfall" "$DIR/sunmode"
-open "$HOME/Applications/Nightfall.app"
+ln -sf "$DIR/midnight" "$DIR/sunmode"
+open "$HOME/Applications/Midnight.app"
 echo
-echo "Nightfall is installed. Look for the sunset icon in the menu bar."
-echo "Terminal shortcut:  echo 'alias nightfall=\"\$HOME/Library/Application\\ Support/Nightfall/nightfall\"' >> ~/.zshrc"
+echo "Midnight is installed. Look for the sunset icon in the menu bar."
+echo "Terminal shortcut:  echo 'alias midnight=\"\$HOME/Library/Application\\ Support/Midnight/midnight\"' >> ~/.zshrc"

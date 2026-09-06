@@ -4,14 +4,14 @@ import Carbon
 import CoreLocation
 import ServiceManagement
 
-// MARK: - Shared files (same as the nightfall CLI)
-let appDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Nightfall")
-let cliURL = appDir.appendingPathComponent("nightfall")
+// MARK: - Shared files (same as the midnight CLI)
+let appDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Midnight")
+let cliURL = appDir.appendingPathComponent("midnight")
 let configURL = appDir.appendingPathComponent("config.json")
 let stateURL = appDir.appendingPathComponent("state.json")
 let learnedURL = appDir.appendingPathComponent("learned.json")
 let shadeURL = appDir.appendingPathComponent("shade.json")
-let agentLabel = "com.ervinyoung.nightfall"
+let agentLabel = "com.ervinyoung.midnight"
 
 struct Settings: Codable {
     var filterEnabled: Bool?; var filterType: Int?; var hue: Double?; var intensity: Double?
@@ -209,7 +209,7 @@ final class Model: ObservableObject {
     let overlay = ShadeOverlay()
     let gamma = Gamma()
     let locator = Locator()
-    let liveQueue = DispatchQueue(label: "nightfall.live")
+    let liveQueue = DispatchQueue(label: "midnight.live")
     private var source: DispatchSourceFileSystemObject?
     private var monitor: Any?
     private var refreshWork: DispatchWorkItem?
@@ -556,7 +556,7 @@ struct Panel: View {
     }
     var mainPage: some View {
         VStack(spacing: 0) {
-            TitleBlock(title: "Nightfall", subtitle: subtitle) {
+            TitleBlock(title: "Midnight", subtitle: subtitle) {
                 SwitchView(isOn: Binding(get: { m.agentRunning }, set: { m.setAgent($0) }), drawn: m.snapshotMode)
             }
 
@@ -598,7 +598,7 @@ struct Panel: View {
             if m.agentRunning {
                 Header(text: m.isPaused ? "Paused" : "Pause")
                 if m.isPaused {
-                    IconRow(icon: "play.fill", label: "Resume Nightfall").onTapGesture { m.resume() }
+                    IconRow(icon: "play.fill", label: "Resume Midnight").onTapGesture { m.resume() }
                 } else {
                     IconRow(icon: "pause.fill", label: "For an Hour").onTapGesture { m.pause("60") }
                     IconRow(icon: "sunrise.fill", label: "Until Sunrise").onTapGesture { m.pause("sunrise") }
@@ -606,7 +606,7 @@ struct Panel: View {
                 SectionEnd()
             }
 
-            SettingsRow(text: "Nightfall Settings…").onTapGesture { page = "settings" }
+            SettingsRow(text: "Midnight Settings…").onTapGesture { page = "settings" }
         }
         .padding(.horizontal, CC.side)
     }
@@ -615,9 +615,9 @@ struct Panel: View {
             let f = DateFormatter(); f.timeStyle = .short; return "Paused until \(f.string(from: u))"
         }
         guard m.agentRunning else { return "Manual" }
-        if m.isFading { return m.isNight ? "Nightfall in progress" : "Sunrise in progress" }
+        if m.isFading { return m.isNight ? "Sunset in progress" : "Sunrise in progress" }
         if m.isNight { return m.sunriseText.isEmpty ? "Night" : "Night · Sunrise at \(m.sunriseText)" }
-        return m.sunsetText.isEmpty ? "Day" : "Day · Nightfall at \(m.sunsetText)"
+        return m.sunsetText.isEmpty ? "Day" : "Day · Sunset at \(m.sunsetText)"
     }
     func isCurrent(_ p: Preset) -> Bool {
         let s = p.settings
@@ -654,7 +654,7 @@ struct SettingsPage: View {
     let fades: [(String, Double)] = [("Instant", 0), ("10 min", 10), ("20 min", 20), ("30 min", 30), ("45 min", 45), ("1 hr", 60)]
     var body: some View {
         VStack(spacing: 0) {
-            TitleBlock(title: "Nightfall Settings", subtitle: "Sunrise \(m.sunriseText) · Sunset \(m.sunsetText)") {
+            TitleBlock(title: "Midnight Settings", subtitle: "Sunrise \(m.sunriseText) · Sunset \(m.sunsetText)") {
                 PillButton(title: "Done", drawn: m.snapshotMode) { back() }
             }
 
@@ -711,9 +711,9 @@ struct SettingsPage: View {
             SectionEnd()
             TextRow(text: "Show Files in Finder").onTapGesture { NSWorkspace.shared.open(appDir) }
             Line()
-            TextRow(text: "View Log").onTapGesture { NSWorkspace.shared.open(appDir.appendingPathComponent("nightfall.log")) }
+            TextRow(text: "View Log").onTapGesture { NSWorkspace.shared.open(appDir.appendingPathComponent("midnight.log")) }
             Line()
-            SettingsRow(text: "Quit Nightfall").onTapGesture { NSApp.terminate(nil) }
+            SettingsRow(text: "Quit Midnight").onTapGesture { NSApp.terminate(nil) }
         }
         .padding(.horizontal, CC.side)
         .onAppear { lat = String(m.config.latitude); lon = String(m.config.longitude) }
@@ -736,7 +736,7 @@ func enforceSingleInstance() {
     let others = NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == me.bundleIdentifier && $0.processIdentifier != me.processIdentifier }
     if !others.isEmpty { NSApp.terminate(nil); exit(0) }
 }
-/// `Nightfall --snapshot out.png [settings]` renders the panel to a PNG for documentation, off-screen, in dark
+/// `Midnight --snapshot out.png [settings]` renders the panel to a PNG for documentation, off-screen, in dark
 /// appearance, on a dark backdrop. No screen-recording grant is needed; system glass is not part of the view.
 func snapshotIfRequested() {
     let args = CommandLine.arguments
@@ -785,7 +785,7 @@ struct SnapshotRoot: View {
 }
 
 @main
-struct NightfallApp: App {
+struct MidnightApp: App {
     @StateObject var model = Model()
     init() { snapshotIfRequested(); enforceSingleInstance() }
     var body: some Scene {
