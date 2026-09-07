@@ -429,10 +429,6 @@ enum CC {
     static let sep       = Color(nsColor: .separatorColor)
     static let circle    = Color(nsColor: .quaternaryLabelColor)
     static let symbol    = Color(nsColor: .secondaryLabelColor)
-    /// The panel's own surface, used to wash out the controls behind the daylight notice.
-    static let scrim = Color(nsColor: NSColor(name: nil) {
-        $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 0.13, alpha: 0.86) : NSColor(white: 0.97, alpha: 0.86)
-    })
 }
 struct Step: Identifiable { let label: String; let value: Double?; var id: String { label } }
 // Denser above the 60 % knee, where blue is already gone and each step is a different feel of red.
@@ -485,8 +481,8 @@ struct IconRow: View {
         .frame(height: 32).contentShape(Rectangle())
     }
 }
-/// Where a real value sits on a detented track, interpolated between stops. The thumb and the preset ticks
-/// share it, so a preset's mark lands exactly where its thumb comes to rest when you apply it.
+/// Where a real value sits on a detented track, interpolated between stops, so a value that arrived from the
+/// engine between two detents still puts the thumb in the right place.
 func trackPosition(_ steps: [Step], value: Double?, isOn: Bool) -> Double {
     let offIndex = Double(steps.firstIndex { $0.value == nil } ?? 0)
     let vs = steps.compactMap { $0.value }.filter { $0 > 0 }
@@ -508,7 +504,6 @@ func trackPosition(_ steps: [Step], value: Double?, isOn: Bool) -> Double {
 
 struct GlassSlider: View {
     let minIcon: String; let maxIcon: String; let steps: [Step]; let current: Double?; let isOn: Bool
-    var ticks: [Double] = []          // positions of the saved presets on this track
     let onChange: (Step, Bool) -> Void
     // The thumb is *derived* from `current` on every render. Only while the user is actually moving it does a
     // local override take over, and that override can never get stuck: it ends on AppKit's editing callback, or
@@ -524,19 +519,18 @@ struct GlassSlider: View {
         dragIdx = nil; lastSent = -1
         onChange(steps[i], true)
     }
-    /// A mark under the track for every preset, at the point its thumb would land.
-    @ViewBuilder private var tickMarks: some View {
-        if !ticks.isEmpty {
-            GeometryReader { geo in
-                let knob: CGFloat = 20                        // the .regular knob; the track insets by half of it
-                let span = max(1, geo.size.width - knob)
-                let last = Double(max(1, steps.count - 1))
-                ForEach(Array(ticks.enumerated()), id: \.offset) { _, pos in
-                    Capsule()
-                        .fill(Color(nsColor: .tertiaryLabelColor))
-                        .frame(width: 1.5, height: 3)
-                        .position(x: knob / 2 + span * CGFloat(pos / last), y: geo.size.height + 3.5)
-                }
+    /// A mark under the track at every detent: one tick per stop the thumb can come to rest on, so the scale
+    /// is legible before you touch it and every mark is somewhere the slider will actually go.
+    private var tickMarks: some View {
+        GeometryReader { geo in
+            let knob: CGFloat = 20                        // the .regular knob; the track insets by half of it
+            let span = max(1, geo.size.width - knob)
+            let last = CGFloat(max(1, steps.count - 1))
+            ForEach(steps.indices, id: \.self) { i in
+                Capsule()
+                    .fill(Color(nsColor: .tertiaryLabelColor))
+                    .frame(width: 2, height: 4)
+                    .position(x: knob / 2 + span * CGFloat(i) / last, y: geo.size.height + 3.5)
             }
         }
     }
@@ -563,9 +557,8 @@ struct GlassSlider: View {
 }
 struct SliderRow: View {
     let minIcon: String; let maxIcon: String; let steps: [Step]; let current: Double?; let isOn: Bool
-    var ticks: [Double] = []
     let onChange: (Step, Bool) -> Void
-    var body: some View { GlassSlider(minIcon: minIcon, maxIcon: maxIcon, steps: steps, current: current, isOn: isOn, ticks: ticks, onChange: onChange).frame(height: 32) }
+    var body: some View { GlassSlider(minIcon: minIcon, maxIcon: maxIcon, steps: steps, current: current, isOn: isOn, onChange: onChange).frame(height: 32) }
 }
 struct SectionEnd: View { var body: some View { Line().padding(.top, 5.5) } }
 struct TextRow: View {
@@ -633,75 +626,45 @@ struct Panel: View {
         .frame(width: 303)
         .onAppear { m.refresh() }
     }
-    // Daylight: the controls are behind glass, because nothing is being applied until the sun goes down.
-    // The title and its switch stay live so the app can still be turned off; one tap clears the glass.
-    @State private var overlayDismissed = false
-    var daylight: Bool { m.snapshotDaylight || (!m.isNight && !overlayDismissed && !m.snapshotMode) }
-
-    /// Where each saved preset sits on a given track, so the sliders show what is available at a glance.
-    func presetTicks(_ steps: [Step], _ read: (Settings) -> (Double?, Bool)) -> [Double] {
-        var seen: Set<Int> = []
-        return (m.config.presets ?? []).compactMap { p in
-            let (v, on) = read(p.settings)
-            let pos = trackPosition(steps, value: v, isOn: on)
-            let key = Int((pos * 100).rounded())        // one mark where two presets coincide
-            return seen.insert(key).inserted ? pos : nil
-        }
-    }
+    // Daylight: a Control Center state row at the top of the pane says what the scheduler is doing
+    // ("Waiting for sunset" + when, the way the Focus pane says "Do Not Disturb · off"), and the pane's
+    // controls stay live underneath — nothing is dimmed, nothing is hidden behind glass.
+    var waiting: Bool { m.snapshotDaylight ? true : (m.enabled && !m.isNight) }
 
     var mainPage: some View {
         VStack(spacing: 0) {
             TitleBlock(title: "Red Light", subtitle: subtitle) {
                 SwitchView(isOn: Binding(get: { m.enabled }, set: { m.setAgent($0) }), drawn: m.snapshotMode)
             }
-            ZStack {
-                controls
-                    .blur(radius: daylight ? 9 : 0)
-                    .opacity(daylight ? 0.4 : 1)
-                    .allowsHitTesting(!daylight)
-                if daylight { daylightNotice }
+            if waiting {
+                IconRow(icon: "sun.horizon", label: "Waiting for sunset",
+                        trailing: m.sunsetText.isEmpty ? nil : m.sunsetText)
+                IconRow(icon: "sun.horizon.fill", label: "Turn On Now").onTapGesture { m.force("night") }
+                SectionEnd()
             }
-            .animation(.easeInOut(duration: 0.18), value: daylight)
+            controls
         }
         .padding(.horizontal, CC.side)
-        .onChange(of: m.isNight) { night in if night { overlayDismissed = false } }
-    }
-
-    var daylightNotice: some View {
-        VStack(spacing: 3) {
-            Text("Waiting for sunset").font(CC.title).foregroundStyle(CC.label)
-            Text(m.enabled ? (m.sunsetText.isEmpty ? "Red Light starts at sunset" : "Red Light starts at \(m.sunsetText)")
-                           : "Turn on above to start at sunset")
-                .font(CC.subtitle).foregroundStyle(CC.secondary)
-            Text("Tap to use it anyway").font(CC.subtitle).foregroundStyle(Color(nsColor: .tertiaryLabelColor)).padding(.top, 6)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(CC.scrim)
-        .contentShape(Rectangle())
-        .onTapGesture { overlayDismissed = true }
+        .animation(.easeInOut(duration: 0.18), value: waiting)
     }
 
     @ViewBuilder var controls: some View {
         VStack(spacing: 0) {
             Header(text: "Red Shift", value: (m.live.warmth ?? 0) > 0.001 ? fmtPct(m.live.warmth) : "Off")
-            SliderRow(minIcon: "sun.max", maxIcon: "moon.fill", steps: warmSteps, current: m.live.warmth, isOn: (m.live.warmth ?? 0) > 0.001,
-                      ticks: presetTicks(warmSteps) { ($0.warmth, ($0.warmth ?? 0) > 0.001) }) { s, final in
+            SliderRow(minIcon: "sun.max", maxIcon: "moon.fill", steps: warmSteps, current: m.live.warmth, isOn: (m.live.warmth ?? 0) > 0.001) { s, final in
                 m.setWarmth(s.value ?? 0, final: final) }
             SectionEnd()
 
             Header(text: "Screen Shade", value: m.shade.enabled ? fmtPct(m.shade.level) : "Off")
-            SliderRow(minIcon: "sun.max", maxIcon: "circle.lefthalf.filled", steps: shadeSteps, current: m.shade.level, isOn: m.shade.enabled,
-                      ticks: presetTicks(shadeSteps) { ($0.shadeLevel, $0.shadeEnabled == true) }) { s, _ in
+            SliderRow(minIcon: "sun.max", maxIcon: "circle.lefthalf.filled", steps: shadeSteps, current: m.shade.level, isOn: m.shade.enabled) { s, _ in
                 if let v = s.value { m.setShade(enabled: true, level: v) } else { m.setShade(enabled: false) } }
             SectionEnd()
 
             Header(text: "Keyboard Backlight", value: (m.live.keyboardBrightness ?? 0) > 0 ? fmtPct(m.live.keyboardBrightness) : "Off")
-            SliderRow(minIcon: "light.min", maxIcon: "light.max", steps: keySteps, current: m.live.keyboardBrightness, isOn: (m.live.keyboardBrightness ?? 0) > 0,
-                      ticks: presetTicks(keySteps) { ($0.keyboardBrightness, ($0.keyboardBrightness ?? 0) > 0) }) { s, final in
+            SliderRow(minIcon: "light.min", maxIcon: "light.max", steps: keySteps, current: m.live.keyboardBrightness, isOn: (m.live.keyboardBrightness ?? 0) > 0) { s, final in
                 m.set("keyboard", s.value.map { String($0 * 100) } ?? "off", final: final) }
             Header(text: "Turn Off After Inactivity", value: fmtSeconds(m.live.keyboardIdleDimSeconds))
-            SliderRow(minIcon: "timer", maxIcon: "clock", steps: idleSteps, current: m.live.keyboardIdleDimSeconds, isOn: true,
-                      ticks: presetTicks(idleSteps) { ($0.keyboardIdleDimSeconds, true) }) { s, final in
+            SliderRow(minIcon: "timer", maxIcon: "clock", steps: idleSteps, current: m.live.keyboardIdleDimSeconds, isOn: true) { s, final in
                 m.set("idle", String(Int(s.value ?? 5)), final: final) }
             SectionEnd()
 
@@ -722,7 +685,7 @@ struct Panel: View {
             saveRow.padding(.top, 4)
             SectionEnd()
 
-            if m.enabled {
+            if m.enabled && !waiting {
                 Header(text: m.isPaused ? "Paused" : "Pause")
                 if m.isPaused {
                     IconRow(icon: "play.fill", label: "Resume Red Light").onTapGesture { m.resume() }
@@ -921,8 +884,11 @@ struct RedLightApp: App {
         MenuBarExtra {
             Panel(m: model)
         } label: {
-            // The sun slipping below the horizon — what the app is named for.
-            Image(systemName: model.isPaused ? "pause.circle" : (model.isNight ? "sunset.fill" : "sunset"))
+            // The sun slipping below the horizon — what the app is named for. One symbol family carries every
+            // state, the way native extras do: outline while waiting for sunset, filled when warming the
+            // display, dimmed when paused or switched off at the master switch.
+            Image(systemName: model.isNight ? "sun.horizon.fill" : "sun.horizon")
+                .opacity(model.isPaused || !model.enabled ? 0.55 : 1)
         }
         .menuBarExtraStyle(.window)
     }

@@ -25,7 +25,7 @@ Apple silicon Mac, macOS 26 or later, Xcode Command Line Tools (`xcode-select --
     git clone https://github.com/ervinyoung/Red-Light-for-mac && cd Red-Light-for-mac && ./install.sh
 
 The installer builds the engine and the menu bar app from source, seeds a config, and starts the sunrise/sunset agent.
-Everything then lives in `~/Library/Application Support/RedLight`; the menu bar app is `~/Applications/Red Light.app`.
+Everything then lives in `~/Library/Application Support/RedLight`; the menu bar app is `/Applications/Red Light.app`.
 A prebuilt, ad-hoc-signed build is on the Releases page (right-click › Open the first time).
 
 ## Terminal
@@ -95,11 +95,13 @@ thumb comes to rest. Presets that share a value share one mark.
 ## The switch and daylight
 The switch at the top right is the master switch, and means what the Wi-Fi switch means. Off restores your
 normal display straight away and nothing happens at sunset; on follows the sun again and clears any pause.
-During the day the controls sit behind glass with "Waiting for sunset" and the time it will start — one tap
-clears it if you want to use red light before then.
+During the day the top of the panel shows a "Waiting for sunset" row with the time it will start, and a
+"Turn On Now" row if you want the night look before then. Every control stays live — the scheduler simply
+hasn't applied anything yet.
 
 ## Menu bar app
-Icon: the sun at the horizon — outline by day, filled at night, a pause badge while paused.
+Icon: the sun at the horizon — outline while waiting for sunset, filled at night, dimmed while paused or off
+at the master switch.
 Panel: Warmth · Screen Shade · Keyboard Backlight · Turn Off After Inactivity (sliders snap to detents and
 apply live) · Presets (tap to apply; right-click for Use at Sunset / Replace / Delete; + saves the current
 look) · Pause · Settings. Global shortcuts: ⌃⌥⌘S toggles the shade, ⌃⌥⌘↑ / ⌃⌥⌘↓ adjust it.

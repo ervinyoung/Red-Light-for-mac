@@ -4,7 +4,7 @@
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DIR="$HOME/Library/Application Support/RedLight"
-mkdir -p "$DIR/gui" "$HOME/Library/LaunchAgents" "$HOME/Applications"
+mkdir -p "$DIR/gui" "$HOME/Library/LaunchAgents"
 echo "→ building engine"
 cp "$HERE/engine/redlight.swift" "$DIR/redlight.swift"
 swiftc -O "$DIR/redlight.swift" -o "$DIR/redlight"
@@ -21,10 +21,10 @@ if [ ! -f "$DIR/config.json" ]; then
   "learning": { "enabled": true, "minNights": 3, "lookbackDays": 14, "maxOffsetMinutes": 120 },
   "nightPresetName": "Night",
   "presets": [
-    { "name": "Dusk",       "icon": "sunset.fill",   "settings": { "warmth": 0.45, "keyboardBrightness": 0.01,  "keyboardIdleDimSeconds": 30, "shadeEnabled": false, "shadeLevel": 0.2 } },
+    { "name": "Wind down",  "icon": "sunset.fill",   "settings": { "warmth": 0.6,  "keyboardBrightness": 0.01,  "keyboardIdleDimSeconds": 30, "shadeEnabled": false, "shadeLevel": 0.2 } },
     { "name": "Night",      "icon": "moon.fill",     "settings": { "warmth": 0.8,  "keyboardBrightness": 0.003, "keyboardIdleDimSeconds": 5,  "shadeEnabled": false, "shadeLevel": 0.2 } },
     { "name": "Deep night", "icon": "moon.zzz.fill", "settings": { "warmth": 1.0,  "keyboardBrightness": 0.001, "keyboardIdleDimSeconds": 5,  "shadeEnabled": true,  "shadeLevel": 0.4 } },
-    { "name": "Movie",      "icon": "film.fill",     "settings": { "warmth": 0.45, "keyboardBrightness": 0.0,   "keyboardIdleDimSeconds": 5,  "shadeEnabled": true,  "shadeLevel": 0.4 } }
+    { "name": "Movie",      "icon": "film.fill",     "settings": { "warmth": 0.6,  "keyboardBrightness": 0.0,   "keyboardIdleDimSeconds": 5,  "shadeEnabled": true,  "shadeLevel": 0.4 } }
   ],
   "shortcuts": {
     "toggleShade": { "keyCode": 1,   "modifiers": ["control", "option", "command"] },
@@ -51,7 +51,7 @@ PL
 launchctl bootout "gui/$(id -u)/com.ervinyoung.redlight" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 ln -sf "$DIR/redlight" "$DIR/sunmode"
-open "$HOME/Applications/Red Light.app"
+open "/Applications/Red Light.app"
 echo
 echo "Red Light is installed. Look for the sunset icon in the menu bar."
 echo "Terminal shortcut:  echo 'alias redlight=\"\$HOME/Library/Application\\ Support/Red Light/redlight\"' >> ~/.zshrc"
