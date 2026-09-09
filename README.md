@@ -3,10 +3,17 @@
 </p>
 
 # Red Light
-Zero blue light after sunset, on your Mac. Blue light after dark is the cheapest sleep loss you are still paying for:
-it holds melatonin down and pushes your clock later. Red Light drives the display's blue channel to zero at sunset,
-holds deep, true reds through the night, dims the keyboard below the system floor, and hands the day back at sunrise.
-A native macOS 27 menu bar panel. Free, open source, on-device, and it learns what you keep choosing.
+A menu bar app that takes every trace of blue out of your Mac at sunset — across a thirty-minute fade you never
+notice — with presets for after dark that it learns to pick for you. Free, open source, on-device.
+
+- **Native, not bolted on.** A Control Center panel one click from the menu bar, built from the system's own
+  controls, type and colour. Sliders apply live as you drag. Nothing new to learn.
+- **Gradual, not a switch.** Red Shift, the screen shade and the keyboard backlight all ease from your day
+  settings to your night ones over thirty minutes from sunset, in steps too small to catch, and back at sunrise.
+- **Presets for after dark.** Dusk to ease in, Night to settle, Movie to drop the whole screen back, Deep night
+  for the last hour. Each one moves the display, the keyboard and the shade together.
+- **It learns.** Settle on the same adjustment three nights out of the last fourteen and it becomes your default —
+  the transition time included. It never fights a change in the moment; it just stops needing to be told.
 
 Site: https://ervinyoung.github.io/Red-Light-for-mac
 
@@ -47,7 +54,6 @@ Make a shortcut once:
     redlight location 37.43 -122.14 [manual|auto]
     redlight learned | forget
     redlight curve               print the warmth curve
-`sunmode` still works as an alias of `redlight`.
 
 ## Red Shift: one slider, two mechanisms
 Two ways to cut blue light have opposite strengths. Scaling the display's blue and green channels at the
@@ -88,23 +94,17 @@ most once a day. `learned.json` holds what it adopted and a dated history; `redl
     redlight.log    transitions, noticed changes, learned adjustments
     legacy/          the previous SunsetMode install, archived
 
-## Preset ticks
-Each slider carries a small mark under the track for every saved preset, at the exact point that preset's
-thumb comes to rest. Presets that share a value share one mark.
-
-## The switch and daylight
-The switch at the top right is the master switch, and means what the Wi-Fi switch means. Off restores your
-normal display straight away and nothing happens at sunset; on follows the sun again and clears any pause.
-During the day the top of the panel shows a "Waiting for sunset" row with the time it will start, and a
-"Turn On Now" row if you want the night look before then. Every control stays live — the scheduler simply
-hasn't applied anything yet.
-
 ## Menu bar app
 Icon: the sun at the horizon — outline while waiting for sunset, filled at night, dimmed while paused or off
 at the master switch.
-Panel: Warmth · Screen Shade · Keyboard Backlight · Turn Off After Inactivity (sliders snap to detents and
-apply live) · Presets (tap to apply; right-click for Use at Sunset / Replace / Delete; + saves the current
-look) · Pause · Settings. Global shortcuts: ⌃⌥⌘S toggles the shade, ⌃⌥⌘↑ / ⌃⌥⌘↓ adjust it.
+Panel: Red Shift · Screen Shade · Keyboard Backlight · Turn Off After Inactivity (sliders snap to detents and
+apply live, and carry a mark under the track at each saved preset's resting point) · Presets (tap to apply;
+right-click for Use at Sunset / Replace / Delete; + saves the current look) · Pause · Settings.
+Global shortcuts: ⌃⌥⌘S toggles the shade, ⌃⌥⌘↑ / ⌃⌥⌘↓ adjust it.
+The switch at the top right is the master switch and means what the Wi-Fi switch means: off restores your
+normal display and nothing happens at sunset; on follows the sun again and clears any pause. During the day
+the top of the panel shows a "Waiting for sunset" row with the time it will start and a "Turn On Now" row if
+you want the night look before then; every control stays live, the scheduler just hasn't applied anything yet.
 Shade and warmth exist only while the app runs (macOS restores the gamma table when it exits).
 Rebuild the engine: `swiftc -O redlight.swift -o redlight`. Rebuild the app: `gui/build.sh`.
 Agent: `launchctl bootout gui/$(id -u)/com.ervinyoung.redlight` / `bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ervinyoung.redlight.plist`
