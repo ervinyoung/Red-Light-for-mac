@@ -292,24 +292,36 @@ func effectiveSun(cfg: Config, learned: Learned, date: Date) -> (rise: Date?, se
     let (r, s) = sunTimes(lat: cfg.latitude, lon: cfg.longitude, date: date)
     return (r?.addingTimeInterval(learned.sunriseOffsetMinutes * 60), s?.addingTimeInterval(learned.sunsetOffsetMinutes * 60))
 }
-func isNight(cfg: Config, learned: Learned, now: Date) -> Bool {
-    let (rise, set) = effectiveSun(cfg: cfg, learned: learned, date: now)
-    guard let r = rise, let s = set else {
-        let m = Calendar.current.component(.month, from: now)
-        return cfg.latitude > 0 ? (m >= 10 || m <= 3) : (m >= 4 && m <= 9)
+/// The same time on a neighbouring calendar day. (±86400 s skips or repeats a day around a DST change.)
+func day(_ n: Int, from d: Date) -> Date { Calendar.current.date(byAdding: .day, value: n, to: d) ?? d.addingTimeInterval(Double(n) * 86400) }
+/// Every switch near `now`, in order (`night` true for a sunset). Today's pair alone isn't enough: a learned offset
+/// can push a sunset past midnight, and a location far from the Mac's time zone (travel, a manual location) puts
+/// its sunset on the next local day — comparing against today's sunrise and sunset alone called those wrong.
+func transitions(cfg: Config, learned: Learned, now: Date) -> [(at: Date, night: Bool)] {
+    var out: [(at: Date, night: Bool)] = []
+    for n in -1...1 {
+        let (r, s) = effectiveSun(cfg: cfg, learned: learned, date: day(n, from: now))
+        if let s = s { out.append((s, true)) }
+        if let r = r, s.map({ r < $0 }) ?? true { out.append((r, false)) }   // offsets crossed on a very short day: night throughout
     }
-    return now < r || now >= s
+    return out.sorted { $0.at < $1.at }
+}
+func isNight(cfg: Config, learned: Learned, now: Date) -> Bool {
+    let ts = transitions(cfg: cfg, learned: learned, now: now)
+    if let last = ts.last(where: { $0.at <= now }) { return last.night }
+    if let next = ts.first { return !next.night }
+    let m = Calendar.current.component(.month, from: now)   // polar day or night: no sunrise or sunset for days
+    return cfg.latitude > 0 ? (m >= 10 || m <= 3) : (m >= 4 && m <= 9)
 }
 /// The transition that most recently began (for computing fade progress after a sleep).
 func lastTransition(cfg: Config, learned: Learned, now: Date) -> Date? {
-    let days = [-86400.0, 0].map { effectiveSun(cfg: cfg, learned: learned, date: now.addingTimeInterval($0)) }
-    return days.flatMap { [$0.rise, $0.set] }.compactMap { $0 }.filter { $0 <= now }.max()
+    transitions(cfg: cfg, learned: learned, now: now).last { $0.at <= now }?.at
 }
 func nextSunrise(cfg: Config, learned: Learned, now: Date) -> Date? {
-    [0.0, 86400].compactMap { effectiveSun(cfg: cfg, learned: learned, date: now.addingTimeInterval($0)).rise }.first { $0 > now }
+    transitions(cfg: cfg, learned: learned, now: now).first { !$0.night && $0.at > now }?.at
 }
 func sunTimes(cfg: Config, learned: Learned, near now: Date) -> (rise: Date, set: Date) {
-    let days = [-86400.0, 0, 86400].map { sunTimes(lat: cfg.latitude, lon: cfg.longitude, date: now.addingTimeInterval($0)) }
+    let days = [-1, 0, 1].map { sunTimes(lat: cfg.latitude, lon: cfg.longitude, date: day($0, from: now)) }
     func nearest(_ times: [Date?]) -> Date { times.compactMap { $0 }.min { abs($0.timeIntervalSince(now)) < abs($1.timeIntervalSince(now)) } ?? now }
     return (nearest(days.map { $0.rise }), nearest(days.map { $0.set }))
 }
@@ -371,7 +383,7 @@ func observe(cfg: Config, learned: Learned, state: State, now: Date) -> (State, 
     let (rise, set) = sunTimes(cfg: cfg, learned: learned, near: now)
     let dayFmt = DateFormatter(); dayFmt.dateFormat = "yyyy-MM-dd"
     let todayRise = sunTimes(lat: cfg.latitude, lon: cfg.longitude, date: now).rise ?? now
-    let nightID = dayFmt.string(from: now < todayRise ? now.addingTimeInterval(-86400) : now)
+    let nightID = dayFmt.string(from: now < todayRise ? day(-1, from: now) : now)
     var count = 0
     func changed(_ field: String, _ a: Double?, _ b: Double?, tol: Double) {
         guard let a = a, let b = b, abs(a - b) > tol else { return }
