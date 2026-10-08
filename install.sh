@@ -10,6 +10,7 @@ cp "$HERE/engine/redlight.swift" "$DIR/redlight.swift"
 swiftc -O "$DIR/redlight.swift" -o "$DIR/redlight"
 echo "→ building app"
 cp "$HERE/app/RedLightApp.swift" "$HERE/app/Info.plist" "$HERE/app/build.sh" "$DIR/gui/"
+rm -rf "$DIR/gui/AppIcon.icon"; cp -R "$HERE/app/AppIcon.icon" "$DIR/gui/"
 chmod +x "$DIR/gui/build.sh"; "$DIR/gui/build.sh"
 if [ ! -f "$DIR/config.json" ]; then
   echo "→ writing default config (location will be resolved by the app; edit config.json to override)"
