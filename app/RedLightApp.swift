@@ -74,7 +74,12 @@ final class Gamma {
     func apply(blue b: Double, green g: Double) {
         guard !isSnapshotRun else { return }
         blue = max(0, min(1, b)); green = max(0, min(1, g))
-        if blue >= 0.999 && green >= 0.999 { CGDisplayRestoreColorSyncSettings(); cache = [:]; return }
+        if blue >= 0.999 && green >= 0.999 {
+            // Undo only what we did. Restoring on every refresh all day long would wipe any other app's (or a
+            // calibrator's) tables once a minute; the cache is non-empty exactly while our tables are on screen.
+            if !cache.isEmpty { CGDisplayRestoreColorSyncSettings(); cache = [:] }
+            return
+        }
         var ids = [CGDirectDisplayID](repeating: 0, count: 16); var n: UInt32 = 0
         CGGetOnlineDisplayList(16, &ids, &n)
         // The baseline must be the display's own ColorSync table, never whatever is on it now: reading a table
