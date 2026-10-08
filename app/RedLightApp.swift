@@ -402,7 +402,8 @@ final class Model: ObservableObject {
     /// What the switch shows: the engine's persisted switch (state.json), set optimistically under the finger.
     /// It is never inferred from launchd — the agent stays loaded and the engine itself honours "off".
     @Published var enabled = true
-    private var enabledPending = false
+    private var switchesInFlight = 0        // `on`/`off` sent to the engine and not yet answered: a count, not a flag,
+                                            // so a quick off-on-off can't hand the switch back to a half-way state
     @Published var launchAtLogin = false
     @Published var recording: String? = nil
     @Published var live = Settings()
@@ -478,7 +479,7 @@ final class Model: ObservableObject {
         state = (try? Data(contentsOf: stateURL)).flatMap { try? dec.decode(ModeState.self, from: $0) }
         learned = (try? Data(contentsOf: learnedURL)).flatMap { try? dec.decode(Learned.self, from: $0) } ?? Learned()
         shade = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? Shade()
-        if !enabledPending { enabled = !(state?.disabled ?? false) }
+        if switchesInFlight == 0 { enabled = !(state?.disabled ?? false) }
         drawLook()
         trueColor.reconsider()
         if #available(macOS 13, *) { launchAtLogin = SMAppService.mainApp.status == .enabled }
@@ -490,7 +491,9 @@ final class Model: ObservableObject {
         }
     }
     /// Off and true colour both mean the display is drawn exactly as macOS would draw it, whatever shade.json says.
-    var isOff: Bool { state?.disabled == true }
+    /// Off is what the switch shows as well as what the engine has recorded: while an `off` is on its way, a refresh
+    /// for some other reason must not paint the old red back under a switch that already says Off.
+    var isOff: Bool { !enabled || state?.disabled == true }
     var heldFor: String? { state?.heldFor }
     var isTinting: Bool { !isOff && ((shade.warmth ?? 0) > 0.001 || shade.enabled) }
     func drawLook() {
@@ -539,7 +542,7 @@ final class Model: ObservableObject {
         var s = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? shade
         if let e = enabled { s.enabled = e }
         if let l = level { s.level = max(0, min(0.9, l)); if l > 0 && enabled == nil { s.enabled = true } }
-        shade = s; overlay.apply(s)
+        shade = s; drawLook()               // not drawn while true colour holds it
         try? enc.encode(s).write(to: shadeURL, options: .atomic)
     }
     /// Warmth: paint the gamma legs now for immediate feedback; the engine applies the tint leg and records it.
@@ -547,19 +550,21 @@ final class Model: ObservableObject {
         guard !isOff else { return }
         let c = warmthCurve(w)
         shade.warmth = w; shade.gammaBlue = c.blue; shade.gammaGreen = c.green
-        gamma.apply(blue: c.blue, green: c.green)
+        drawLook()
         set("warmth", w <= 0 ? "off" : String(format: "%.1f", w * 100), final: final)
     }
     /// The master switch. One engine command, persisted; the screen follows at once, before the engine replies.
     func setEnabled(_ on: Bool) {
         enabled = on                        // the switch moves under the finger, not a second later
-        enabledPending = true
-        if !on { overlay.apply(Shade()); gamma.apply(blue: 1, green: 1) }
+        switchesInFlight += 1
+        drawLook()                          // off: the normal display now; on: still normal until the engine is on
         liveQueue.async { [weak self] in
             guard let self = self else { return }
-            self.ensureAgent()
+            // The switch first, then the agent: loading it runs a `check` at once, which must find the switch
+            // already recorded rather than race the command and save state from before it.
             _ = runStatus(cliURL.path, [on ? "on" : "off"])
-            DispatchQueue.main.async { self.enabledPending = false; self.refresh() }
+            self.ensureAgent()
+            DispatchQueue.main.async { self.switchesInFlight -= 1; self.refresh() }
         }
     }
     func hold(_ app: String) { overlay.apply(Shade()); gamma.apply(blue: 1, green: 1); runCLI(["hold", app]) }
