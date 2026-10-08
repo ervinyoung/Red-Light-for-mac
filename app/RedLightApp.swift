@@ -53,11 +53,15 @@ func warmthCurve(_ w: Double) -> (blue: Double, green: Double, tint: Double) {
     return (0, 0.60 - 0.25 * t, 0.50 * t)
 }
 
+/// A documentation render (`--snapshot`) is a second process; it must never touch the real display.
+let isSnapshotRun = CommandLine.arguments.contains("--snapshot")
+
 // MARK: - Gamma legs of warmth (channel scaling at the display's transfer table)
 final class Gamma {
     private var cache: [CGDirectDisplayID: ([CGGammaValue], [CGGammaValue], [CGGammaValue], UInt32)] = [:]
     private(set) var blue: Double = 1, green: Double = 1
     init() {
+        guard !isSnapshotRun else { return }
         CGDisplayRestoreColorSyncSettings()
         let reapply: (Notification) -> Void = { [weak self] _ in
             guard let self = self else { return }
@@ -68,10 +72,14 @@ final class Gamma {
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main, using: reapply)
     }
     func apply(blue b: Double, green g: Double) {
+        guard !isSnapshotRun else { return }
         blue = max(0, min(1, b)); green = max(0, min(1, g))
         if blue >= 0.999 && green >= 0.999 { CGDisplayRestoreColorSyncSettings(); cache = [:]; return }
         var ids = [CGDirectDisplayID](repeating: 0, count: 16); var n: UInt32 = 0
         CGGetOnlineDisplayList(16, &ids, &n)
+        // The baseline must be the display's own ColorSync table, never whatever is on it now: reading a table
+        // that already carries a scaling (ours from before, or a process that just quit) applied red twice.
+        if ids.prefix(Int(n)).contains(where: { cache[$0] == nil }) { CGDisplayRestoreColorSyncSettings() }
         for d in ids.prefix(Int(n)) {
             if cache[d] == nil {
                 let cap = CGDisplayGammaTableCapacity(d)
@@ -81,6 +89,23 @@ final class Gamma {
             }
             let (r, gg, bb, got) = cache[d]!
             CGSetDisplayTransferByTable(d, got, r, gg.map { $0 * Float(green) }, bb.map { $0 * Float(blue) })
+        }
+    }
+    /// Something else can put the tables back — a process that used them quitting, ColorSync, a display waking —
+    /// without any notification. Every couple of seconds, check the top of each table is what we last set.
+    func verify() {
+        guard !isSnapshotRun, blue < 0.999 || green < 0.999 else { return }
+        var ids = [CGDirectDisplayID](repeating: 0, count: 16); var n: UInt32 = 0
+        CGGetOnlineDisplayList(16, &ids, &n)
+        for d in ids.prefix(Int(n)) {
+            guard let (_, gg, bb, got) = cache[d], got > 0 else { apply(blue: blue, green: green); return }
+            let cap = CGDisplayGammaTableCapacity(d)
+            var r = [CGGammaValue](repeating: 0, count: Int(cap)), g2 = r, b2 = r; var now: UInt32 = 0
+            guard CGGetDisplayTransferByTable(d, cap, &r, &g2, &b2, &now) == .success, now == got else { continue }
+            let i = Int(got) - 1
+            if abs(g2[i] - gg[i] * Float(green)) > 0.004 || abs(b2[i] - bb[i] * Float(blue)) > 0.004 {
+                cache = [:]; apply(blue: blue, green: green); return
+            }
         }
     }
 }
@@ -117,6 +142,7 @@ final class ShadeOverlay {
         }
     }
     func apply(_ s: Shade) {
+        guard !isSnapshotRun else { return }
         current = s
         if windows.count != NSScreen.screens.count { rebuild() }
         let alpha = s.enabled ? max(0, min(0.9, s.level)) : 0
@@ -402,6 +428,7 @@ final class Model: ObservableObject {
             src.resume(); source = src
         }
         Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.refresh() }
+        if !isSnapshotRun { Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.gamma.verify() } }
         registerHotkeys()
         // Waking up: run a check right away so the lid opening at 11 PM never shows 60 s of daylight look.
         let nc = NSWorkspace.shared.notificationCenter
