@@ -331,8 +331,8 @@ func timezoneGuess() -> (Double, Double, String)? {
 // MARK: - Persistence
 let enc: JSONEncoder = { let e = JSONEncoder(); e.outputFormatting = [.prettyPrinted, .sortedKeys]; e.dateEncodingStrategy = .iso8601; return e }()
 let dec: JSONDecoder = { let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d }()
-func loadConfig() -> Config {
-    guard let d = try? Data(contentsOf: configURL), let c = try? dec.decode(Config.self, from: d) else { log("ERROR: cannot read \(configURL.path)"); exit(1) }
+func loadConfig() -> Config? {
+    guard let d = try? Data(contentsOf: configURL), let c = try? dec.decode(Config.self, from: d) else { log("ERROR: cannot read \(configURL.path)"); return nil }
     return c
 }
 func loadState() -> State? { (try? Data(contentsOf: stateURL)).flatMap { try? dec.decode(State.self, from: $0) } }
@@ -577,7 +577,10 @@ if !["status", "suntimes", "learned", "curve"].contains(cmd) {
     var waited = 0                                          // released when the process exits; bounded (10 s) so a
     while fd >= 0 && flock(fd, LOCK_EX | LOCK_NB) != 0 && waited < 500 { usleep(20_000); waited += 1 }   // hung run can't wedge the rest
 }
-let cfg = loadConfig()
+// A config.json that won't parse stops the schedule (no location), but never the switch: off, true colour, and an
+// off check need nothing from it but the day defaults, and the plain normal look will do for those.
+let needsNoSun = ["off", "hold", "release"].contains(cmd) || (cmd == "check" && loadState()?.disabled == true)
+guard let cfg = loadConfig() ?? (needsNoSun ? Config(latitude: 0, longitude: 0, night: Settings(), dayDefaults: Settings()) : nil) else { exit(1) }
 var learned = loadLearned()
 let now = Date()
 let fmt = DateFormatter(); fmt.dateStyle = .none; fmt.timeStyle = .short
