@@ -640,7 +640,10 @@ final class Model: ObservableObject {
     func registerHotkeys() {
         let hk = config.shortcuts ?? Shortcuts()
         HotKeys.shared.register([
-            (hk.toggleShade, { [weak self] in guard let s = self else { return }; s.setShade(enabled: !s.shade.enabled) }),
+            // "Lighter" all the way down leaves the level at 0; switching on at nothing would look like a dead key.
+            (hk.toggleShade, { [weak self] in guard let s = self else { return }
+                let on = !s.shade.enabled
+                s.setShade(enabled: on, level: on && s.shade.level < 0.05 ? shadeSteps[1].value : nil) }),
             (hk.shadeDown, { [weak self] in guard let s = self else { return }
                 let l = ((s.shade.enabled ? s.shade.level : 0) - 0.1).rounded(toPlaces: 2)
                 if l <= 0 { s.setShade(enabled: false, level: 0) } else { s.setShade(enabled: true, level: l) } }),
