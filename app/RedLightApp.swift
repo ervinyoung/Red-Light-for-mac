@@ -423,6 +423,9 @@ final class Model: ObservableObject {
     private var monitor: Any?
     private var refreshWork: DispatchWorkItem?
     var lastKeyboard: Double? = nil
+    /// Slider steps queued for the engine and not yet applied. While any are, what the engine reports is a step
+    /// behind the finger, and reading it back would snap the thumb, the header and the screen back to that step.
+    private var setsInFlight = 0
 
     init() {
         // A documentation snapshot is a second process beside the running app: it only reads. No gamma, no shade
@@ -504,7 +507,9 @@ final class Model: ObservableObject {
         }
         state = (try? Data(contentsOf: stateURL)).flatMap { try? dec.decode(ModeState.self, from: $0) }
         learned = (try? Data(contentsOf: learnedURL)).flatMap { try? dec.decode(Learned.self, from: $0) } ?? Learned()
-        shade = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? Shade()
+        var sh = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? Shade()
+        if setsInFlight > 0 { sh.warmth = shade.warmth; sh.gammaBlue = shade.gammaBlue; sh.gammaGreen = shade.gammaGreen }
+        shade = sh
         if switchesInFlight == 0 { enabled = !(state?.disabled ?? false) }
         drawLook()
         trueColor.reconsider()
@@ -512,7 +517,8 @@ final class Model: ObservableObject {
         liveQueue.async { [weak self] in
             let sun = cli("suntimes").trimmingCharacters(in: .whitespacesAndNewlines)
             let status = cli("status")
-            DispatchQueue.main.async { guard let self = self else { return }; self.sunLine = sun; self.parseLive(status) }
+            // Steps queued after this status (the queue is serial) make it stale; the final step refreshes again.
+            DispatchQueue.main.async { guard let self = self else { return }; self.sunLine = sun; if self.setsInFlight == 0 { self.parseLive(status) } }
         }
     }
     /// Off and true colour both mean the display is drawn exactly as macOS would draw it, whatever shade.json says.
@@ -660,9 +666,12 @@ final class Model: ObservableObject {
         case "warmth": live.warmth = value == "off" ? 0 : (Double(value) ?? 0) / 100
         default: break
         }
+        setsInFlight += 1
         liveQueue.async { [weak self] in
             _ = cli("set", field, value)
-            if final { DispatchQueue.main.async { self?.scheduleRefresh(after: 0.05) } }
+            DispatchQueue.main.async { guard let self = self else { return }
+                self.setsInFlight -= 1
+                if final { self.scheduleRefresh(after: 0.05) } }
         }
     }
     func applyPreset(_ p: Preset) { runCLI(["preset", "apply", p.name]) }
