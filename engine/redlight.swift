@@ -566,6 +566,13 @@ func refuseIfOff() {
 
 // MARK: - Main
 let cmd = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "check"
+// One engine at a time. launchd's minute check, the app's wake check and a slider's `set` all read-modify-write
+// state.json, shade.json and config.json; two overlapping runs would snapshot each other's half-applied look as
+// "your day settings" and log it as a manual change. The lock is released when the process exits.
+if !["status", "suntimes", "learned", "curve"].contains(cmd) {
+    let fd = open(appDir.appendingPathComponent(".lock").path, O_CREAT | O_RDWR, 0o644)
+    if fd >= 0 { flock(fd, LOCK_EX) }
+}
 let cfg = loadConfig()
 var learned = loadLearned()
 let now = Date()
