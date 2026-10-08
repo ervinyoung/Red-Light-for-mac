@@ -225,14 +225,15 @@ final class Locator: NSObject, CLLocationManagerDelegate {
 }
 
 // MARK: - True colour for colour-critical apps
-/// Where colour is the work. Anything that files itself under graphics & design, photography or video counts too.
+/// Where colour is the work. Anything that files itself under graphics & design or photography counts too; "video"
+/// does not, because players and Zoom file themselves there, and a movie at night should stay red.
 let colorCriticalPrefixes = ["com.figma.", "com.bohemiancoding.sketch", "com.adobe.Photoshop", "com.adobe.illustrator",
     "com.adobe.InDesign", "com.adobe.Lightroom", "com.adobe.lightroom", "com.adobe.AfterEffects", "com.adobe.PremierePro",
     "com.adobe.xd", "com.seriflabs.affinity", "com.canva.affinity", "com.pixelmatorteam.pixelmator", "com.apple.FinalCut",
     "com.apple.motionapp", "com.blackmagic-design.DaVinciResolve", "com.captureone.", "com.phaseone.captureone",
     "org.blenderfoundation.blender", "com.framer.", "com.apple.ColorSyncUtility", "com.apple.DigitalColorMeter",
     "com.linearity.curve", "com.kiwi.Kiwi", "com.spline.", "design.penpot", "com.lunacy."]
-let colorCriticalCategories = ["public.app-category.graphics-design", "public.app-category.photography", "public.app-category.video"]
+let colorCriticalCategories = ["public.app-category.graphics-design", "public.app-category.photography"]
 /// Apps that file themselves that way but are for looking, not for colour work.
 let colorCriticalExceptions = ["com.apple.Photos", "com.apple.Preview", "com.apple.QuickTimePlayerX", "com.apple.TV", "com.apple.PhotoBooth", "com.apple.Image_Capture"]
 
@@ -336,8 +337,9 @@ final class TrueColorPrompt {
         let host = NSHostingView(rootView: view)
         host.frame.size = host.fittingSize
         let p = NSPanel(contentRect: NSRect(origin: .zero, size: host.fittingSize), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = true; p.level = .popUpMenu
+        p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = true
         p.isFloatingPanel = true; p.becomesKeyOnlyIfNeeded = true; p.hidesOnDeactivate = false
+        p.level = .statusBar                    // after isFloatingPanel, which resets the level to .floating
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         p.contentView = host
         // Under the menu bar item, the way its own pane opens; the menu bar's right end if it can't be found.
@@ -375,7 +377,7 @@ struct TrueColorPromptView: View {
                 }
             }
             .padding(.top, 12)
-            ToggleRow(label: "Remember for \(name)", isOn: $rememberIt).padding(.top, 6)
+            ToggleRow(label: "Remember for \(name)", isOn: $rememberIt, drawn: isSnapshotRun).padding(.top, 6)
             HStack(spacing: 8) {
                 Spacer()
                 Button("Keep Red Light") { choose(false, rememberIt) }.buttonStyle(.glass).controlSize(.small)
@@ -1023,7 +1025,7 @@ struct SettingsPage: View {
                 ToggleRow(label: "\(r.name) in True Color", isOn: Binding(get: { r.always }, set: { m.trueColor.remember(r.id, always: $0) }), drawn: m.snapshotMode)
                     .contextMenu { Button("Forget Choice") { m.trueColor.forget(r.id) } }
             }
-            TextRow(text: "Figma, Sketch, Photoshop and other design, photo and video apps can show true color while they are in front. Red Light comes back when you switch away.", secondary: true)
+            TextRow(text: "Figma, Sketch, Photoshop, Lightroom, video editors and other design and photo apps can show true color while they are in front. Red Light comes back when you switch away.", secondary: true)
             Line()
 
             Header(text: "Keyboard Shortcuts")
@@ -1069,7 +1071,7 @@ func snapshotIfRequested() {
     let args = CommandLine.arguments
     guard let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count else { return }
     let out = URL(fileURLWithPath: args[i + 1])
-    let page = args.contains("settings") ? "settings" : "main"
+    let page = args.contains("settings") ? "settings" : args.contains("prompt") ? "prompt" : "main"
     let app = NSApplication.shared; app.setActivationPolicy(.prohibited)
     let model = Model(); model.snapshotMode = true; model.snapshotDaylight = args.contains("daylight")
     // Let the live values (read through the engine, off the main thread) land before the view first appears,
@@ -1106,7 +1108,14 @@ func snapshotIfRequested() {
 struct SnapshotRoot: View {
     @ObservedObject var m: Model; let page: String; var light = false; var clear = false
     var body: some View {
-        Group { if page == "main" { Panel(m: m) } else { SettingsPage(m: m, back: {}) .frame(width: 303) } }
+        Group {
+            if page == "main" { Panel(m: m) }
+            else if page == "prompt" {
+                let figma = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.figma.Desktop")
+                TrueColorPromptView(name: "Figma", icon: figma.map { NSWorkspace.shared.icon(forFile: $0.path) } ?? NSImage(named: NSImage.applicationIconName)!) { _, _ in }
+            }
+            else { SettingsPage(m: m, back: {}) .frame(width: 303) }
+        }
             .fixedSize(horizontal: false, vertical: true)
             // stands in for the system glass in the export; `clear` leaves it out so the panel can be
             // composited over real artwork with a real blurred backdrop
