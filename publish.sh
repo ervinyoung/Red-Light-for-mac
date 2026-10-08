@@ -3,6 +3,9 @@
 # Run once after `gh auth login`.
 set -e
 cd "$(dirname "$0")"
+ZIP="../RedLight-2.2-macos26-arm64.zip"
+# Check before anything is pushed: a missing zip used to fail only at the last step, after the repo went public.
+gh release view v2.2 >/dev/null 2>&1 || [ -f "$ZIP" ] || { echo "missing $ZIP (the prebuilt release); build it first"; exit 1; }
 LOGIN=$(gh api user --jq .login)
 echo "→ publishing as $LOGIN"
 if [ "$LOGIN" != "ervinyoung" ]; then
@@ -21,8 +24,7 @@ gh api -X POST "repos/$LOGIN/Red-Light-for-mac/pages" -f 'source[branch]=main' -
   || gh api -X PUT "repos/$LOGIN/Red-Light-for-mac/pages" -f 'source[branch]=main' -f 'source[path]=/docs' >/dev/null
 gh repo edit "$LOGIN/Red-Light-for-mac" --add-topic macos --add-topic blue-light --add-topic sleep --add-topic menu-bar --add-topic swift >/dev/null 2>&1 || true
 echo "→ release"
-ZIP="../RedLight-2.2-macos26-arm64.zip"
 gh release view v2.2 >/dev/null 2>&1 || gh release create v2.2 "$ZIP" --title "Red Light 2.2" --notes "Prebuilt Red Light.app and the redlight engine for Apple silicon, macOS 26+. Ad-hoc signed: right-click › Open the first time. Building from source with ./install.sh is recommended."
 echo
-echo "Site:    https://$LOGIN.github.io/redlight/   (Pages takes a minute or two on first publish)"
+echo "Site:    https://$LOGIN.github.io/Red-Light-for-mac/   (Pages takes a minute or two on first publish)"
 echo "Repo:    https://github.com/$LOGIN/Red-Light-for-mac"

@@ -34,17 +34,21 @@ Apple silicon Mac, macOS 26 or later, Xcode Command Line Tools (`xcode-select --
 The installer builds the engine and the menu bar app from source, seeds a config, and starts the sunrise/sunset agent.
 Everything then lives in `~/Library/Application Support/RedLight`; the menu bar app is `/Applications/Red Light.app`.
 A prebuilt, ad-hoc-signed build is on the Releases page (right-click › Open the first time).
+Run `./install.sh` again to update; your settings, what it has learned and the switch are kept.
+`./uninstall.sh` removes the app, the engine and the agent but keeps your settings; `./uninstall.sh --all` deletes them too.
 
 ## Terminal
 Make a shortcut once:
-    echo 'alias redlight="$HOME/Library/Application\ Support/Red Light/redlight"' >> ~/.zshrc && source ~/.zshrc
 
+    echo 'alias redlight="$HOME/Library/Application\ Support/RedLight/redlight"' >> ~/.zshrc && source ~/.zshrc
+
+    redlight on | off            the master switch: off restores the normal display and nothing happens at sunset
     redlight status              mode, fade progress, pause, sun times, current settings, location
     redlight suntimes            today's sunrise / sunset and the effective switch times
-    redlight night | day         switch now (instant, no fade)
+    redlight night | day         switch now (instant, no fade; night also turns the switch on)
     redlight pause 60            pause for 60 minutes (restores the day look, learns nothing meanwhile)
     redlight pause sunrise       pause until the next sunrise
-    redlight resume
+    redlight resume              end a pause (and turn the switch on)
     redlight set warmth 80       the unified control, 0–100 or off (see below)
     redlight set keyboard 0.3    keyboard backlight in percent (0.1–30) or off
     redlight set idle 30         keys off after N seconds of inactivity
@@ -53,7 +57,11 @@ Make a shortcut once:
     redlight shade on|off|toggle|up|down|<0-90>
     redlight location 37.43 -122.14 [manual|auto]
     redlight learned | forget
+    redlight hold Figma          true colour while a colour-critical app is in front (the look is kept, not changed)
+    redlight release             the red back after a hold
     redlight curve               print the warmth curve
+
+While the switch is off, `pause`, `set`, `preset apply` and `shade` refuse; turn it on first.
 
 ## Red Shift: one slider, two mechanisms
 Two ways to cut blue light have opposite strengths. Scaling the display's blue and green channels at the
@@ -63,9 +71,11 @@ channel goes dark. Apple's Color Tint filter maps each pixel to its luminance an
 disappears, but hue collapses, and at high intensity everything is the same red blob.
 
 Red Light's Red Shift (`warmth` in the config and CLI) uses each where it is best:
+
     0–60 %    channel scaling only: blue 100 % → 0, green trimmed to 60 %. Maximum legibility.
     60–100 %  blue stays at zero; green eases to 35 % while a modest luminance-preserving tint (up to 50 %)
               folds the removed green back into red brightness instead of letting it fade to black.
+
 80 % is the default at night. 60 % is the knee: no blue at all, no tint at all.
 The gamma legs are drawn by the menu bar app and the tint leg by the engine; `shade.json` carries both.
 
@@ -86,13 +96,13 @@ most once a day. `learned.json` holds what it adopted and a dated history; `redl
 
 ## Files
     config.json      night preset, day defaults, location + source, fade length, learning, presets, shortcuts
-    state.json       mode, day snapshot, fade in progress, pause
+    state.json       the master switch, mode, day snapshot, fade in progress, pause, true-colour hold
     learned.json     adopted adjustments and history
     events.jsonl     observed manual changes (pruned past the lookback window)
     shade.json       what the app should draw: shade overlay, warmth, gamma multipliers
     commanded.json   the keyboard brightness last set (the hardware reports 0 once it idle-dims)
-    redlight.log    transitions, noticed changes, learned adjustments
-    legacy/          the previous SunsetMode install, archived
+    redlight.log     transitions, noticed changes, learned adjustments
+    launchd.err.log  anything the agent's runs write to stderr
 
 ## Menu bar app
 Icon: the sun at the horizon — outline while waiting for sunset, filled at night, dimmed while paused or off
@@ -106,5 +116,7 @@ normal display and nothing happens at sunset; on follows the sun again and clear
 the top of the panel shows a "Waiting for sunset" row with the time it will start and a "Turn On Now" row if
 you want the night look before then; every control stays live, the scheduler just hasn't applied anything yet.
 Shade and warmth exist only while the app runs (macOS restores the gamma table when it exits).
-Rebuild the engine: `swiftc -O redlight.swift -o redlight`. Rebuild the app: `gui/build.sh`.
-Agent: `launchctl bootout gui/$(id -u)/com.ervinyoung.redlight` / `bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ervinyoung.redlight.plist`
+Rebuild everything from the repo with `./install.sh`, or only the app with `app/build.sh`.
+The agent (`~/Library/LaunchAgents/com.ervinyoung.redlight.plist`, a `redlight check` every minute) stays loaded:
+off is the switch or `redlight off`, not unloading it. The app loads an unloaded agent again, and an older build
+expressed "off" that way, so an unloaded agent can come back as off.

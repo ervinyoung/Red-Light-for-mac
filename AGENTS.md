@@ -31,7 +31,10 @@ How to uphold the rule in code:
 - `app/RedLightApp.swift` — SwiftUI menu bar pane (~900 lines, everything UI lives here)
 - `engine/redlight.swift` — the CLI + launchd scheduler (~700 lines)
 - `app/build.sh` — builds the app into `/Applications` (ad-hoc signed)
-- `install.sh` — full install: engine, config seed, LaunchAgent, app
+- `install.sh` — full install: engine, config seed, LaunchAgent, app (re-run to update; keeps settings)
+- `uninstall.sh` — turns Red Light off, removes agent, app and engine; `--all` also deletes settings
+- Shared files live in `~/Library/Application Support/RedLight`. The engine serialises itself with `flock` on
+  `.lock`; the app writes config.json by merging only the keys it changed, never a whole stale copy
 - `tools/` — documentation-image pipeline (`--snapshot` renders the pane off-screen to PNG;
   flags: `settings`, `daylight`, `light`, `clear`)
 
