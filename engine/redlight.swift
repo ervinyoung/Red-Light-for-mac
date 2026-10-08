@@ -580,6 +580,8 @@ func blank() -> State { var s = State(mode: "unset", daySnapshot: nil, lastSeen:
 func refuseIfOff() {
     if loadState()?.disabled == true { print("Red Light is off. Turn it on first: redlight on"); exit(1) }
 }
+/// Direct edits (set, preset, reapply) while an app holds true colour change the look underneath; the tint still waits.
+func honourHold() { holdTint = loadState()?.heldFor != nil }
 
 // MARK: - Main
 let cmd = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "check"
@@ -707,7 +709,7 @@ case "set":
     let off = (raw == "off")
     guard off || Double(raw) != nil else { print("'\(raw)' is not a number or 'off'"); exit(2) }
     let num = Double(raw) ?? 0
-    refuseIfOff()
+    refuseIfOff(); honourHold()
     var s = Settings()
     switch field {
     case "warmth": s.warmth = off ? 0 : max(0, min(1, num / 100))
@@ -732,7 +734,7 @@ case "preset":
         for p in presets { print("\(p.name)\(c.nightPresetName?.lowercased() == p.name.lowercased() ? "  (at sunset)" : ""): \(describe(p.settings))") }
     case "apply":
         guard let p = find() else { print("no preset named \(name)"); exit(1) }
-        refuseIfOff()
+        refuseIfOff(); honourHold()
         var s = p.settings
         if s.warmth == nil { s.warmth = 0 }
         if s.keyboardBrightness != nil { s.keyboardAutoBrightness = false }
@@ -760,7 +762,7 @@ case "preset":
         saveConfig(c)
         var l = learned; l.nightKeyboardBrightness = nil; l.nightIdleDimSeconds = nil; l.nightShadeLevel = nil; l.nightWarmth = nil; saveLearned(l)
         log("sunset preset is now '\(p.name)'")
-        if var st = loadState(), st.mode == "night", st.pausedUntil == nil, st.disabled != true { st.ramp = nil; apply(nightPreset(cfg: c, learned: l), label: "NIGHT (preset changed)"); st.lastSeen = readCurrent(); saveState(st) }
+        if var st = loadState(), st.mode == "night", st.pausedUntil == nil, st.disabled != true { st.ramp = nil; holdTint = st.heldFor != nil; apply(nightPreset(cfg: c, learned: l), label: "NIGHT (preset changed)"); st.lastSeen = readCurrent(); saveState(st) }
     case "delete":
         guard find() != nil else { print("no preset named \(name)"); exit(1) }
         presets.removeAll { $0.name.lowercased() == name.lowercased() }
@@ -786,7 +788,7 @@ case "shade":
     print("shade \(sh.enabled ? "on" : "off") \(Int((sh.level * 100).rounded()))%")
 case "reapply":
     if var st = loadState(), st.mode == "night", st.pausedUntil == nil, st.disabled != true {
-        st.ramp = nil
+        st.ramp = nil; holdTint = st.heldFor != nil
         apply(nightPreset(cfg: cfg, learned: learned), label: "NIGHT (preset edited)")
         st.lastSeen = readCurrent(); saveState(st)
     }
