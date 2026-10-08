@@ -568,12 +568,14 @@ func refuseIfOff() {
 
 // MARK: - Main
 let cmd = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "check"
-// One engine at a time. launchd's minute check, the app's wake check and a slider's `set` all read-modify-write
-// state.json, shade.json and config.json; two overlapping runs would snapshot each other's half-applied look as
-// "your day settings" and log it as a manual change. The lock is released when the process exits.
+// One engine at a time. launchd's minute check, the app's wake check, a slider's `set` and the switch all
+// read-modify-write state.json, shade.json and config.json; two overlapping runs would snapshot each other's
+// half-applied look as "your day settings" and log it as a manual change, and a check that loaded state just before
+// `off` would save "on" back over it and step its fade onto a screen that was just cleared.
 if !["status", "suntimes", "learned", "curve"].contains(cmd) {
     let fd = open(appDir.appendingPathComponent(".lock").path, O_CREAT | O_RDWR, 0o644)
-    if fd >= 0 { flock(fd, LOCK_EX) }
+    var waited = 0                                          // released when the process exits; bounded (10 s) so a
+    while fd >= 0 && flock(fd, LOCK_EX | LOCK_NB) != 0 && waited < 500 { usleep(20_000); waited += 1 }   // hung run can't wedge the rest
 }
 let cfg = loadConfig()
 var learned = loadLearned()
