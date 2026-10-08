@@ -26,13 +26,18 @@ struct Shortcuts: Codable {
     var shadeUp     = Shortcut(keyCode: 126, modifiers: ["control", "option", "command"])
 }
 struct Preset: Codable, Identifiable { var name: String; var icon: String; var settings: Settings; var id: String { name } }
+/// True colour for colour-critical apps: ask, or remember per app (bundle identifiers).
+struct TrueColor: Codable { var ask = true; var always: [String] = []; var never: [String] = [] }
 struct Config: Codable {
     var latitude: Double; var longitude: Double; var locationSource: String?; var fadeMinutes: Double?
     var night: Settings; var dayDefaults: Settings
     var learning: Learning?; var shortcuts: Shortcuts?; var presets: [Preset]?; var nightPresetName: String?
+    var trueColor: TrueColor?
 }
 struct Ramp: Codable { var start: Date; var seconds: Double; var from: Settings; var to: Settings; var label: String }
-struct ModeState: Codable { var mode: String; var daySnapshot: Settings?; var lastSeen: Settings?; var lastNotified: Date?; var ramp: Ramp?; var pausedUntil: Date? }
+/// Written only by the engine. `disabled` is the master switch; `heldFor` names the app holding true colour.
+struct ModeState: Codable { var mode: String; var daySnapshot: Settings?; var lastSeen: Settings?; var lastNotified: Date?; var ramp: Ramp?; var pausedUntil: Date?
+    var disabled: Bool?; var heldFor: String? }
 struct Learned: Codable {
     var sunsetOffsetMinutes = 0.0; var sunriseOffsetMinutes = 0.0
     var nightKeyboardBrightness: Double?; var nightIdleDimSeconds: Double?; var nightShadeLevel: Double?; var nightWarmth: Double?
@@ -193,6 +198,171 @@ final class Locator: NSObject, CLLocationManagerDelegate {
     func locationManager(_ m: CLLocationManager, didFailWithError error: Error) { NSLog("location: \(error.localizedDescription)") }
 }
 
+// MARK: - True colour for colour-critical apps
+/// Where colour is the work. Anything that files itself under graphics & design, photography or video counts too.
+let colorCriticalPrefixes = ["com.figma.", "com.bohemiancoding.sketch", "com.adobe.Photoshop", "com.adobe.illustrator",
+    "com.adobe.InDesign", "com.adobe.Lightroom", "com.adobe.lightroom", "com.adobe.AfterEffects", "com.adobe.PremierePro",
+    "com.adobe.xd", "com.seriflabs.affinity", "com.canva.affinity", "com.pixelmatorteam.pixelmator", "com.apple.FinalCut",
+    "com.apple.motionapp", "com.blackmagic-design.DaVinciResolve", "com.captureone.", "com.phaseone.captureone",
+    "org.blenderfoundation.blender", "com.framer.", "com.apple.ColorSyncUtility", "com.apple.DigitalColorMeter",
+    "com.linearity.curve", "com.kiwi.Kiwi", "com.spline.", "design.penpot", "com.lunacy."]
+let colorCriticalCategories = ["public.app-category.graphics-design", "public.app-category.photography", "public.app-category.video"]
+/// Apps that file themselves that way but are for looking, not for colour work.
+let colorCriticalExceptions = ["com.apple.Photos", "com.apple.Preview", "com.apple.QuickTimePlayerX", "com.apple.TV", "com.apple.PhotoBooth", "com.apple.Image_Capture"]
+
+func isColorCritical(_ app: NSRunningApplication) -> Bool {
+    guard let id = app.bundleIdentifier, !colorCriticalExceptions.contains(id) else { return false }
+    if colorCriticalPrefixes.contains(where: { id.hasPrefix($0) }) { return true }
+    guard let url = app.bundleURL, let info = Bundle(url: url)?.infoDictionary,
+          let cat = info["LSApplicationCategoryType"] as? String else { return false }
+    return colorCriticalCategories.contains(cat)
+}
+
+/// Watches the frontmost app. In a colour-critical app at night it asks — once a night per app — whether to show
+/// true colour while that app is in front, remembers the answer if asked to, and gives the red back when you leave.
+final class TrueColorWatcher {
+    struct Remembered { let id: String; let name: String; let always: Bool }
+    private unowned let m: Model
+    private var askedTonight: Set<String> = []
+    private var declinedHere: String?          // "Bring Red Light Back" pressed while this app stays in front
+    private var releaseWork: DispatchWorkItem?
+    private var lastMode: String?
+    private let prompt = TrueColorPrompt()
+    init(model: Model) {
+        m = model
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] n in
+            guard let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            self?.consider(app)
+        }
+    }
+    private var policy: TrueColor { m.config.trueColor ?? TrueColor() }
+    var remembered: [Remembered] {
+        let p = policy
+        func name(_ id: String) -> String {
+            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { return id }
+            return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+        }
+        return (p.always.map { Remembered(id: $0, name: name($0), always: true) } + p.never.map { Remembered(id: $0, name: name($0), always: false) })
+            .sorted { $0.name < $1.name }
+    }
+    func remember(_ id: String, always: Bool) {
+        var t = policy
+        t.always.removeAll { $0 == id }; t.never.removeAll { $0 == id }
+        if always { t.always.append(id) } else { t.never.append(id) }
+        m.config.trueColor = t; m.saveConfig(reapply: false)
+    }
+    func forget(_ id: String) {
+        var t = policy; t.always.removeAll { $0 == id }; t.never.removeAll { $0 == id }
+        m.config.trueColor = t; m.saveConfig(reapply: false)
+    }
+    /// Called on every refresh: a new night clears the once-a-night memory, and if red light has just begun
+    /// while a colour-critical app is already in front, that app gets the same treatment as if it had just opened.
+    func reconsider() {
+        guard !m.snapshotMode else { return }
+        if let mode = m.state?.mode, mode != lastMode { if mode == "night" { askedTonight = [] }; lastMode = mode }
+        if let app = NSWorkspace.shared.frontmostApplication { consider(app) }
+    }
+    func bringBack() {
+        declinedHere = m.heldFor.flatMap { _ in NSWorkspace.shared.frontmostApplication?.bundleIdentifier }
+        m.release()
+    }
+    private func consider(_ app: NSRunningApplication) {
+        guard !m.snapshotMode, let id = app.bundleIdentifier, id != Bundle.main.bundleIdentifier else { return }   // opening this pane changes nothing
+        if declinedHere != nil && declinedHere != id { declinedHere = nil }
+        guard isColorCritical(app) else {
+            prompt.hide()
+            guard m.heldFor != nil else { return }
+            // A glance at a message shouldn't flash the room red and back: give it a moment.
+            releaseWork?.cancel()
+            let w = DispatchWorkItem { [weak self] in
+                guard let self = self, let front = NSWorkspace.shared.frontmostApplication,
+                      front.bundleIdentifier == Bundle.main.bundleIdentifier || !isColorCritical(front) else { return }
+                if self.m.heldFor != nil { self.m.release() }
+            }
+            releaseWork = w; DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: w)
+            return
+        }
+        releaseWork?.cancel()
+        let name = app.localizedName ?? "This app"
+        guard m.enabled, !m.isPaused, m.isTinting || m.heldFor != nil, declinedHere != id else { return }
+        if m.heldFor != nil { if m.heldFor != name { m.hold(name) }; return }
+        let p = policy
+        if p.never.contains(id) { return }
+        if p.always.contains(id) { m.hold(name); return }
+        guard p.ask, !askedTonight.contains(id), !prompt.isShowing else { return }
+        askedTonight.insert(id)
+        prompt.show(name: name, icon: app.icon ?? NSWorkspace.shared.icon(forFile: app.bundleURL?.path ?? "")) { [weak self] trueColor, rememberIt in
+            guard let self = self else { return }
+            if rememberIt { self.remember(id, always: trueColor) }
+            if trueColor, NSWorkspace.shared.frontmostApplication?.bundleIdentifier == id { self.m.hold(name) }
+        }
+    }
+}
+
+/// A Liquid Glass card under the menu bar icon. It never takes focus from the app you are working in.
+final class TrueColorPrompt {
+    private var panel: NSPanel?
+    private var timeout: DispatchWorkItem?
+    var isShowing: Bool { panel?.isVisible ?? false }
+    func show(name: String, icon: NSImage, choose: @escaping (_ trueColor: Bool, _ remember: Bool) -> Void) {
+        hide()
+        let view = TrueColorPromptView(name: name, icon: icon) { [weak self] tc, rem in self?.hide(); choose(tc, rem) }
+        let host = NSHostingView(rootView: view)
+        host.frame.size = host.fittingSize
+        let p = NSPanel(contentRect: NSRect(origin: .zero, size: host.fittingSize), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = true; p.level = .popUpMenu
+        p.isFloatingPanel = true; p.becomesKeyOnlyIfNeeded = true; p.hidesOnDeactivate = false
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        p.contentView = host
+        // Under the menu bar item, the way its own pane opens; the menu bar's right end if it can't be found.
+        let item = NSApp.windows.first { String(describing: type(of: $0)).contains("NSStatusBarWindow") }?.frame
+        let screen = NSScreen.screens.first { sc in item.map { sc.frame.intersects($0) } ?? false } ?? NSScreen.main ?? NSScreen.screens[0]
+        let vis = screen.visibleFrame, size = host.fittingSize
+        var x = (item?.midX ?? vis.maxX - size.width / 2 - 8) - size.width / 2
+        x = max(vis.minX + 8, min(x, vis.maxX - size.width - 8))
+        p.setFrameOrigin(NSPoint(x: x, y: vis.maxY - size.height - 6))
+        p.alphaValue = 0; p.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { $0.duration = 0.2; p.animator().alphaValue = 1 }
+        panel = p
+        let w = DispatchWorkItem { [weak self] in self?.hide() }      // no answer is "not now"
+        timeout = w; DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: w)
+    }
+    func hide() {
+        timeout?.cancel(); timeout = nil
+        guard let p = panel else { return }
+        panel = nil
+        NSAnimationContext.runAnimationGroup({ $0.duration = 0.15; p.animator().alphaValue = 0 }, completionHandler: { p.orderOut(nil) })
+    }
+}
+struct TrueColorPromptView: View {
+    let name: String; let icon: NSImage
+    let choose: (Bool, Bool) -> Void
+    @State private var rememberIt = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(nsImage: icon).resizable().interpolation(.high).frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(name) is open").font(CC.title).foregroundStyle(CC.label)
+                    Text("Colors aren’t accurate under Red Light. Show true color while \(name) is in front? Red Light comes back when you switch away.")
+                        .font(CC.subtitle).foregroundStyle(CC.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.top, 12)
+            ToggleRow(label: "Remember for \(name)", isOn: $rememberIt).padding(.top, 6)
+            HStack(spacing: 8) {
+                Spacer()
+                Button("Keep Red Light") { choose(false, rememberIt) }.buttonStyle(.glass).controlSize(.small)
+                Button("Show True Color") { choose(true, rememberIt) }.buttonStyle(.glassProminent).controlSize(.small)
+            }
+            .padding(.top, 4).padding(.bottom, 12)
+        }
+        .padding(.horizontal, CC.side)
+        .frame(width: 303)
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+    }
+}
+
 // MARK: - Model
 final class Model: ObservableObject {
     @Published var config = Config(latitude: 34.05, longitude: -118.24, locationSource: nil, fadeMinutes: 30, night: Settings(), dayDefaults: Settings(), learning: Learning(), shortcuts: Shortcuts())
@@ -201,7 +371,9 @@ final class Model: ObservableObject {
     @Published var shade = Shade()
     @Published var sunLine = ""
     @Published var agentRunning = false
-    @Published var enabled = false          // what the switch shows; set optimistically, then confirmed
+    /// What the switch shows: the engine's persisted switch (state.json), set optimistically under the finger.
+    /// It is never inferred from launchd — the agent stays loaded and the engine itself honours "off".
+    @Published var enabled = true
     private var enabledPending = false
     @Published var launchAtLogin = false
     @Published var recording: String? = nil
@@ -212,6 +384,7 @@ final class Model: ObservableObject {
     let overlay = ShadeOverlay()
     let gamma = Gamma()
     let locator = Locator()
+    lazy var trueColor = TrueColorWatcher(model: self)
     let liveQueue = DispatchQueue(label: "redlight.live")
     private var source: DispatchSourceFileSystemObject?
     private var monitor: Any?
@@ -219,6 +392,7 @@ final class Model: ObservableObject {
     var lastKeyboard: Double? = nil
 
     init() {
+        ensureAgent()
         refresh()
         let fd = open(appDir.path, O_EVTONLY)
         if fd >= 0 {
@@ -245,6 +419,17 @@ final class Model: ObservableObject {
         }
         locator.onDenied = { [weak self] in self?.locationDenied = true }
         locateIfAuto()
+        _ = trueColor
+    }
+    var plistPath: String { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(agentLabel).plist").path }
+    /// The agent is always loaded now. Builds before this one expressed "off" by unloading it, so an unloaded
+    /// agent with no recorded switch is carried over as off before it is loaded again.
+    func ensureAgent() {
+        let label = "gui/\(getuid())/\(agentLabel)"
+        guard FileManager.default.fileExists(atPath: plistPath), !runStatus("/bin/launchctl", ["print", label]).ok else { return }
+        let st = (try? Data(contentsOf: stateURL)).flatMap { try? dec.decode(ModeState.self, from: $0) }
+        if let st = st, st.disabled == nil { _ = runStatus(cliURL.path, ["off"]) }
+        _ = runStatus("/bin/launchctl", ["bootstrap", "gui/\(getuid())", plistPath])
     }
     func locateIfAuto() { if config.locationSource != "manual" { locator.request() } }
     func useMyLocation() { config.locationSource = "auto"; saveConfig(reapply: false); locator.request() }
@@ -264,16 +449,25 @@ final class Model: ObservableObject {
         state = (try? Data(contentsOf: stateURL)).flatMap { try? dec.decode(ModeState.self, from: $0) }
         learned = (try? Data(contentsOf: learnedURL)).flatMap { try? dec.decode(Learned.self, from: $0) } ?? Learned()
         shade = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? Shade()
-        overlay.apply(shade)
-        gamma.apply(blue: shade.gammaBlue ?? 1, green: shade.gammaGreen ?? 1)
+        if !enabledPending { enabled = !(state?.disabled ?? false) }
+        drawLook()
+        trueColor.reconsider()
         if #available(macOS 13, *) { launchAtLogin = SMAppService.mainApp.status == .enabled }
         liveQueue.async { [weak self] in
             let sun = cli("suntimes").trimmingCharacters(in: .whitespacesAndNewlines)
             let status = cli("status")
             let running = runStatus("/bin/launchctl", ["print", "gui/\(getuid())/\(agentLabel)"]).ok
-            DispatchQueue.main.async { guard let self = self else { return }; self.sunLine = sun; self.parseLive(status); self.agentRunning = running
-                if !self.enabledPending { self.enabled = running } }
+            DispatchQueue.main.async { guard let self = self else { return }; self.sunLine = sun; self.parseLive(status); self.agentRunning = running }
         }
+    }
+    /// Off and true colour both mean the display is drawn exactly as macOS would draw it, whatever shade.json says.
+    var isOff: Bool { state?.disabled == true }
+    var heldFor: String? { state?.heldFor }
+    var isTinting: Bool { !isOff && ((shade.warmth ?? 0) > 0.001 || shade.enabled) }
+    func drawLook() {
+        if isOff || heldFor != nil { overlay.apply(Shade()); gamma.apply(blue: 1, green: 1); return }
+        overlay.apply(shade)
+        gamma.apply(blue: shade.gammaBlue ?? 1, green: shade.gammaGreen ?? 1)
     }
     var isNight: Bool { state?.mode == "night" }
     var isPaused: Bool { if let u = state?.pausedUntil { return u > Date() }; return false }
@@ -301,6 +495,7 @@ final class Model: ObservableObject {
     func resume() { runCLI(["resume"]) }
     func forget() { runCLI(["forget"]) }
     func setShade(enabled: Bool? = nil, level: Double? = nil) {
+        guard !isOff else { return }
         var s = shade
         if let e = enabled { s.enabled = e }
         if let l = level { s.level = max(0, min(0.9, l)); if l > 0 && enabled == nil { s.enabled = true } }
@@ -309,31 +504,26 @@ final class Model: ObservableObject {
     }
     /// Warmth: paint the gamma legs now for immediate feedback; the engine applies the tint leg and records it.
     func setWarmth(_ w: Double, final: Bool) {
+        guard !isOff else { return }
         let c = warmthCurve(w)
         shade.warmth = w; shade.gammaBlue = c.blue; shade.gammaGreen = c.green
         gamma.apply(blue: c.blue, green: c.green)
         set("warmth", w <= 0 ? "off" : String(format: "%.1f", w * 100), final: final)
     }
-    func setAgent(_ on: Bool) {
+    /// The master switch. One engine command, persisted; the screen follows at once, before the engine replies.
+    func setEnabled(_ on: Bool) {
         enabled = on                        // the switch moves under the finger, not a second later
         enabledPending = true
-        let plist = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(agentLabel).plist").path
+        if !on { overlay.apply(Shade()); gamma.apply(blue: 1, green: 1) }
         liveQueue.async { [weak self] in
             guard let self = self else { return }
-            if on {
-                _ = runStatus("/bin/launchctl", ["bootstrap", "gui/\(getuid())", plist])
-                _ = runStatus(cliURL.path, ["resume"])      // clears any pause and applies the look this hour calls for
-            } else {
-                _ = runStatus("/bin/launchctl", ["bootout", "gui/\(getuid())/\(agentLabel)"])
-                _ = runStatus(cliURL.path, ["day"])         // hand the normal display back straight away
-            }
-            let ok = runStatus("/bin/launchctl", ["print", "gui/\(getuid())/\(agentLabel)"]).ok
-            DispatchQueue.main.async {
-                self.agentRunning = ok; self.enabled = ok; self.enabledPending = false
-                self.scheduleRefresh(after: 0.05)
-            }
+            self.ensureAgent()
+            _ = runStatus(cliURL.path, [on ? "on" : "off"])
+            DispatchQueue.main.async { self.enabledPending = false; self.refresh() }
         }
     }
+    func hold(_ app: String) { overlay.apply(Shade()); gamma.apply(blue: 1, green: 1); runCLI(["hold", app]) }
+    func release() { runCLI(["release"]) }
     func setLaunchAtLogin(_ on: Bool) {
         guard #available(macOS 13, *) else { return }
         do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch { NSLog("login item: \(error)") }
@@ -629,23 +819,33 @@ struct Panel: View {
     // Daylight: a Control Center state row at the top of the pane says what the scheduler is doing
     // ("Waiting for sunset" + when, the way the Focus pane says "Do Not Disturb · off"), and the pane's
     // controls stay live underneath — nothing is dimmed, nothing is hidden behind glass.
-    var waiting: Bool { m.snapshotDaylight ? true : (m.enabled && !m.isNight) }
+    var waiting: Bool { m.snapshotDaylight ? true : (m.enabled && !m.isNight && m.heldFor == nil) }
 
     var mainPage: some View {
         VStack(spacing: 0) {
             TitleBlock(title: "Red Light", subtitle: subtitle) {
-                SwitchView(isOn: Binding(get: { m.enabled }, set: { m.setAgent($0) }), drawn: m.snapshotMode)
+                SwitchView(isOn: Binding(get: { m.enabled }, set: { m.setEnabled($0) }), drawn: m.snapshotMode)
             }
-            if waiting {
-                IconRow(icon: "sun.horizon", label: "Waiting for sunset",
-                        trailing: m.sunsetText.isEmpty ? nil : m.sunsetText)
-                IconRow(icon: "sun.horizon.fill", label: "Turn On Now").onTapGesture { m.force("night") }
-                SectionEnd()
+            if !m.enabled {
+                // Off is off: like Wi-Fi or Bluetooth switched off, the pane keeps only its switch and its settings.
+                SettingsRow(text: "Red Light Settings…").onTapGesture { page = "settings" }
+            } else {
+                if let app = m.heldFor {
+                    IconRow(icon: "eyedropper.halffull", label: "True Color for \(app)", trailing: nil, active: true)
+                    IconRow(icon: "sun.horizon.fill", label: "Bring Red Light Back").onTapGesture { m.trueColor.bringBack() }
+                    SectionEnd()
+                } else if waiting {
+                    IconRow(icon: "sun.horizon", label: "Waiting for sunset",
+                            trailing: m.sunsetText.isEmpty ? nil : m.sunsetText)
+                    IconRow(icon: "sun.horizon.fill", label: "Turn On Now").onTapGesture { m.force("night") }
+                    SectionEnd()
+                }
+                controls
             }
-            controls
         }
         .padding(.horizontal, CC.side)
         .animation(.easeInOut(duration: 0.18), value: waiting)
+        .animation(.easeInOut(duration: 0.18), value: m.enabled)
     }
 
     @ViewBuilder var controls: some View {
@@ -685,7 +885,7 @@ struct Panel: View {
             saveRow.padding(.top, 4)
             SectionEnd()
 
-            if m.enabled && !waiting {
+            if !waiting {
                 Header(text: m.isPaused ? "Paused" : "Pause")
                 if m.isPaused {
                     IconRow(icon: "play.fill", label: "Resume Red Light").onTapGesture { m.resume() }
@@ -703,7 +903,8 @@ struct Panel: View {
         if m.isPaused && !m.snapshotMode, let u = m.state?.pausedUntil {
             let f = DateFormatter(); f.timeStyle = .short; return "Paused until \(f.string(from: u))"
         }
-        guard m.agentRunning else { return "Manual" }
+        guard m.enabled else { return "Off" }
+        if let app = m.heldFor { return "True color while \(app) is in front" }
         if m.isFading { return m.isNight ? "Sunset in progress" : "Sunrise in progress" }
         if m.isNight { return m.sunriseText.isEmpty ? "Night" : "Night · Sunrise at \(m.sunriseText)" }
         return m.sunsetText.isEmpty ? "Day" : "Day · Sunset at \(m.sunsetText)"
@@ -748,7 +949,7 @@ struct SettingsPage: View {
             }
 
             Header(text: "Sun")
-            ToggleRow(label: "Switch at Sunset and Sunrise", isOn: Binding(get: { m.agentRunning }, set: { m.setAgent($0) }), drawn: m.snapshotMode)
+            ToggleRow(label: "Switch at Sunset and Sunrise", isOn: Binding(get: { m.enabled }, set: { m.setEnabled($0) }), drawn: m.snapshotMode)
             HStack {
                 Text("Location").font(CC.row).foregroundStyle(CC.label); Spacer()
                 Text(locationLabel).font(CC.small).foregroundStyle(.secondary)
@@ -786,6 +987,16 @@ struct SettingsPage: View {
                 ForEach(m.learned.history.suffix(3).reversed(), id: \.self) { TextRow(text: $0, secondary: true) }
                 TextRow(text: "Forget Everything Learned").onTapGesture { m.forget() }
             }
+            Line()
+
+            Header(text: "True Color")
+            ToggleRow(label: "Ask in Color-Sensitive Apps", isOn: Binding(get: { m.config.trueColor?.ask ?? true },
+                set: { var t = m.config.trueColor ?? TrueColor(); t.ask = $0; m.config.trueColor = t; m.saveConfig(reapply: false) }), drawn: m.snapshotMode)
+            ForEach(m.trueColor.remembered, id: \.id) { r in
+                ToggleRow(label: "\(r.name) in True Color", isOn: Binding(get: { r.always }, set: { m.trueColor.remember(r.id, always: $0) }), drawn: m.snapshotMode)
+                    .contextMenu { Button("Forget Choice") { m.trueColor.forget(r.id) } }
+            }
+            TextRow(text: "Figma, Sketch, Photoshop and other design, photo and video apps can show true color while they are in front. Red Light comes back when you switch away.", secondary: true)
             Line()
 
             Header(text: "Keyboard Shortcuts")

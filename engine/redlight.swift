@@ -1,7 +1,8 @@
 // redlight — eases the Mac into a warm, low-blue-light look after sunset and back again at sunrise,
 // and quietly learns from manual adjustments.
 // Usage: redlight check | night | day | pause <min>|sunrise | resume | set <field> <value> | preset … |
-//        shade … | location <lat> <lon> [auto|manual] | reapply | status | suntimes | learned | forget
+//        shade … | location <lat> <lon> [auto|manual] | reapply | status | suntimes | learned | forget |
+//        on | off | hold <app> | release
 import Foundation
 
 let appDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/RedLight")
@@ -65,6 +66,7 @@ struct Config: Codable {
     var presets: [Preset]?
     var nightPresetName: String?
     var shortcuts: JSONAny?
+    var trueColor: JSONAny?             // owned by the app: which colour-critical apps get true colour
 }
 struct JSONAny: Codable {
     let value: Any
@@ -101,6 +103,11 @@ struct State: Codable {
     var lastNotified: Date?
     var ramp: Ramp?
     var pausedUntil: Date?
+    /// The master switch. When true nothing is scheduled, nothing is learned, and `check` holds the display
+    /// at its normal look — this, not whether the launchd agent happens to be loaded, is what "off" means.
+    var disabled: Bool?
+    /// True colour for a colour-critical app in front (e.g. "Figma"): the look is suspended, not changed.
+    var heldFor: String?
 }
 struct Learned: Codable {
     var sunsetOffsetMinutes: Double = 0
@@ -178,12 +185,14 @@ func readCurrent() -> Settings {
     let sh = loadShade(); s.shadeEnabled = sh.enabled; s.shadeLevel = sh.level; s.warmth = sh.warmth ?? 0
     return s
 }
+/// Set while a colour-critical app holds true colour: everything is applied as usual except the tint stays off.
+var holdTint = false
 func apply(_ s: Settings, label: String, quiet: Bool = false) {
     if let w = s.warmth {
         // Warmth owns the color filter. The tint is one leg of the curve; the gamma legs go to the app.
         let c = warmthCurve(w)
         maSetType(colorCategory, 16); maSetHue(1.0)
-        maSetInten(c.tint); maSetEnabled(colorCategory, c.tint > 0.001)
+        maSetInten(c.tint); maSetEnabled(colorCategory, !holdTint && c.tint > 0.001)
         var sh = loadShade(); sh.warmth = w; sh.gammaBlue = c.blue; sh.gammaGreen = c.green
         if let e = s.shadeEnabled { sh.enabled = e }
         if let l = s.shadeLevel { sh.level = l }
@@ -525,6 +534,36 @@ func runningApp() -> Bool {
 }
 extension Double { func rounded(toPlaces p: Int) -> Double { let m = pow(10.0, Double(p)); return (self * m).rounded() / m } }
 
+// MARK: - Off, and true colour
+/// The normal display: the day look with no red shift and no shade, whatever the snapshot remembered.
+func offLook(cfg: Config, state: State?) -> Settings {
+    var s = dayLook(cfg: cfg, state: state)
+    s.warmth = 0; s.shadeEnabled = false
+    return s
+}
+/// Is anything Red Light draws still on screen? (Our tint is Color Tint, type 16; other filters are the user's.)
+func anythingRed() -> Bool {
+    let sh = loadShade()
+    let ourTint = maGetEnabled(colorCategory) && maGetType(colorCategory) == 16 && maGetInten() > 0.001
+    return ourTint || (sh.warmth ?? 0) > 0.001 || sh.enabled
+}
+func turnOff(_ st: inout State, cfg: Config, reason: String) {
+    st.disabled = true; st.pausedUntil = nil; st.ramp = nil; st.heldFor = nil
+    apply(offLook(cfg: cfg, state: st), label: "OFF (\(reason))")
+    st.mode = "day"; st.daySnapshot = nil
+    st.lastSeen = readCurrent()
+}
+/// Suspends only the tint leg; the app sees `heldFor` and draws neither gamma nor shade meanwhile.
+func suppressTint() { if maGetType(colorCategory) == 16 { maSetEnabled(colorCategory, false) } }
+func restoreTint() {
+    let c = warmthCurve(loadShade().warmth ?? 0)
+    maSetType(colorCategory, 16); maSetHue(1.0); maSetInten(c.tint); maSetEnabled(colorCategory, c.tint > 0.001)
+}
+func blank() -> State { State(mode: "unset", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil) }
+func refuseIfOff() {
+    if loadState()?.disabled == true { print("Red Light is off. Turn it on first: redlight on"); exit(1) }
+}
+
 // MARK: - Main
 let cmd = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "check"
 let cfg = loadConfig()
@@ -535,11 +574,19 @@ let fadeMinutes = cfg.fadeMinutes ?? 30
 
 switch cmd {
 case "check":
-    var st = loadState() ?? State(mode: "unset", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil)
+    var st = loadState() ?? blank()
+    if st.disabled == true {
+        // Off means off: if anything — a stale filter pref, a half-finished fade, an old build — left red on
+        // screen, take it away. Never schedules, never learns.
+        if anythingRed() { apply(offLook(cfg: cfg, state: st), label: "OFF (held)"); st.lastSeen = readCurrent() }
+        saveState(st); exit(0)
+    }
     if let until = st.pausedUntil {
         if now < until { saveState(st); exit(0) }       // paused: leave everything alone, learn nothing
         st.pausedUntil = nil; log("pause ended")
     }
+    let held = st.heldFor != nil
+    holdTint = held                     // transitions and fades carry on underneath a hold; only the tint waits
     let (observed, changes) = observe(cfg: cfg, learned: learned, state: st, now: now)
     st = observed
     pruneEvents(olderThan: now.addingTimeInterval(-Double((cfg.learning ?? Learning()).lookbackDays + 7) * 86400))
@@ -557,10 +604,39 @@ case "check":
 case "night", "day":
     var st = loadState()
     st?.pausedUntil = nil
+    if cmd == "night" { st?.disabled = nil }      // "Turn On Now" is, plainly, on
+    st?.heldFor = nil
     saveState(startTransition(to: cmd, cfg: cfg, learned: learned, state: st, now: now, fade: 0))
+case "on":
+    var st = loadState() ?? blank()
+    st.disabled = nil; st.pausedUntil = nil; st.heldFor = nil
+    let want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
+    // Always apply, even if the mode already matches: "on" must leave the screen in the state the switch shows.
+    st = startTransition(to: want, cfg: cfg, learned: learned, state: st, now: now, fade: 0)
+    saveState(st); log("turned on (\(want))"); print("on (\(want))")
+case "off":
+    var st = loadState() ?? blank()
+    turnOff(&st, cfg: cfg, reason: "switch")
+    saveState(st); log("turned off"); print("off")
+case "hold":
+    // redlight hold <app name>: true colour while a colour-critical app is in front
+    var st = loadState() ?? blank()
+    guard st.disabled != true, CommandLine.arguments.count > 2 else { exit(0) }
+    st.heldFor = CommandLine.arguments[2]
+    suppressTint(); st.lastSeen = readCurrent()
+    saveState(st); log("true colour for \(st.heldFor!)")
+case "release":
+    var st = loadState() ?? blank()
+    guard let who = st.heldFor else { exit(0) }
+    st.heldFor = nil
+    if st.disabled != true { restoreTint() }
+    st.lastSeen = readCurrent()
+    saveState(st); log("red light back after \(who)")
 case "pause":
     // redlight pause <minutes> | sunrise
-    var st = loadState() ?? State(mode: "unset", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil)
+    refuseIfOff()
+    var st = loadState() ?? blank()
+    st.heldFor = nil
     let arg = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "60"
     let until: Date
     if arg == "sunrise" { until = nextSunrise(cfg: cfg, learned: learned, now: now) ?? now.addingTimeInterval(8 * 3600) }
@@ -570,8 +646,8 @@ case "pause":
     st.pausedUntil = until
     saveState(st); log("paused until \(fmt.string(from: until))"); print("paused until \(fmt.string(from: until))")
 case "resume":
-    var st = loadState() ?? State(mode: "unset", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil)
-    st.pausedUntil = nil
+    var st = loadState() ?? blank()
+    st.pausedUntil = nil; st.disabled = nil; st.heldFor = nil
     let want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
     if st.mode != want { st = startTransition(to: want, cfg: cfg, learned: learned, state: st, now: now, fade: 0) }
     saveState(st); log("resumed"); print("resumed (\(want))")
@@ -593,6 +669,7 @@ case "set":
     let off = (raw == "off")
     guard off || Double(raw) != nil else { print("'\(raw)' is not a number or 'off'"); exit(2) }
     let num = Double(raw) ?? 0
+    refuseIfOff()
     var s = Settings()
     switch field {
     case "warmth": s.warmth = off ? 0 : max(0, min(1, num / 100))
@@ -617,6 +694,7 @@ case "preset":
         for p in presets { print("\(p.name)\(c.nightPresetName?.lowercased() == p.name.lowercased() ? "  (at sunset)" : ""): \(describe(p.settings))") }
     case "apply":
         guard let p = find() else { print("no preset named \(name)"); exit(1) }
+        refuseIfOff()
         var s = p.settings
         if s.warmth == nil { s.warmth = 0 }
         if s.keyboardBrightness != nil { s.keyboardAutoBrightness = false }
@@ -644,7 +722,7 @@ case "preset":
         saveConfig(c)
         var l = learned; l.nightKeyboardBrightness = nil; l.nightIdleDimSeconds = nil; l.nightShadeLevel = nil; l.nightWarmth = nil; saveLearned(l)
         log("sunset preset is now '\(p.name)'")
-        if var st = loadState(), st.mode == "night", st.pausedUntil == nil { st.ramp = nil; apply(nightPreset(cfg: c, learned: l), label: "NIGHT (preset changed)"); st.lastSeen = readCurrent(); saveState(st) }
+        if var st = loadState(), st.mode == "night", st.pausedUntil == nil, st.disabled != true { st.ramp = nil; apply(nightPreset(cfg: c, learned: l), label: "NIGHT (preset changed)"); st.lastSeen = readCurrent(); saveState(st) }
     case "delete":
         guard find() != nil else { print("no preset named \(name)"); exit(1) }
         presets.removeAll { $0.name.lowercased() == name.lowercased() }
@@ -653,6 +731,7 @@ case "preset":
     default: print("usage: redlight preset list|apply|save|night|delete <name>"); exit(2)
     }
 case "shade":
+    refuseIfOff()
     var sh = loadShade()
     let arg = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "toggle"
     switch arg {
@@ -668,7 +747,7 @@ case "shade":
     saveShade(sh)
     print("shade \(sh.enabled ? "on" : "off") \(Int((sh.level * 100).rounded()))%")
 case "reapply":
-    if var st = loadState(), st.mode == "night", st.pausedUntil == nil {
+    if var st = loadState(), st.mode == "night", st.pausedUntil == nil, st.disabled != true {
         st.ramp = nil
         apply(nightPreset(cfg: cfg, learned: learned), label: "NIGHT (preset edited)")
         st.lastSeen = readCurrent(); saveState(st)
@@ -680,7 +759,8 @@ case "suntimes":
 case "status":
     let st = loadState()
     let eff = effectiveSun(cfg: cfg, learned: learned, date: now)
-    var head = "mode: \(st?.mode ?? "unset")"
+    var head = st?.disabled == true ? "mode: off" : "mode: \(st?.mode ?? "unset")"
+    if let h = st?.heldFor { head += "   true colour for \(h)" }
     if let u = st?.pausedUntil, u > now { head += "   paused until \(fmt.string(from: u))" }
     if let r = st?.ramp { head += "   fading \(Int(min(1, now.timeIntervalSince(r.start) / r.seconds) * 100))%" }
     head += "   switches: day at \(eff.rise.map(fmt.string) ?? "-"), night at \(eff.set.map(fmt.string) ?? "-")"
@@ -705,5 +785,5 @@ case "forget":
 case "curve":
     for w in stride(from: 0.0, through: 1.0, by: 0.1) { let c = warmthCurve(w); print(String(format: "warmth %3.0f%%  blue %.2f  green %.2f  tint %.2f", w * 100, c.blue, c.green, c.tint)) }
 default:
-    print("usage: redlight check|night|day|pause|resume|location|set|preset|shade|reapply|status|suntimes|learned|forget"); exit(2)
+    print("usage: redlight on|off|check|night|day|pause|resume|hold|release|location|set|preset|shade|reapply|status|suntimes|learned|forget"); exit(2)
 }
