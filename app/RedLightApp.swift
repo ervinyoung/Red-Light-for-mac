@@ -403,7 +403,6 @@ final class Model: ObservableObject {
     @Published var learned = Learned()
     @Published var shade = Shade()
     @Published var sunLine = ""
-    @Published var agentRunning = false
     /// What the switch shows: the engine's persisted switch (state.json), set optimistically under the finger.
     /// It is never inferred from launchd — the agent stays loaded and the engine itself honours "off".
     @Published var enabled = true
@@ -431,15 +430,13 @@ final class Model: ObservableObject {
         guard !snapshotMode else { refresh(); return }
         ensureAgent()
         refresh()
-        let fd = open(appDir.path, O_EVTONLY)
-        if fd >= 0 {
-            let src = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)
-            src.setEventHandler { [weak self] in self?.scheduleRefresh() }
-            src.setCancelHandler { close(fd) }
-            src.resume(); source = src
+        watchFolder()
+        Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            if self.source == nil { self.watchFolder() }       // the folder was missing last time: try again
+            self.refresh()
         }
-        Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.refresh() }
-        if !isSnapshotRun { Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.gamma.verify() } }
+        Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.gamma.verify() }
         registerHotkeys()
         // Waking up: run a check right away so the lid opening at 11 PM never shows 60 s of daylight look.
         let nc = NSWorkspace.shared.notificationCenter
@@ -474,6 +471,22 @@ final class Model: ObservableObject {
         if migrate, let st = st, st.disabled == nil { _ = runStatus(cliURL.path, ["off"]) }
         _ = runStatus("/bin/launchctl", ["bootstrap", "gui/\(getuid())", plistPath])
     }
+    /// Every engine write is an atomic rename inside the folder, which the folder's own descriptor sees as a write.
+    /// If the folder itself is moved or deleted (a reinstall), that descriptor watches nothing ever again, so the
+    /// watch is opened afresh on the new folder — or on the minute timer, if it isn't back yet.
+    private func watchFolder() {
+        source?.cancel(); source = nil
+        let fd = open(appDir.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let src = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)
+        src.setEventHandler { [weak self, weak src] in
+            guard let self = self else { return }
+            if let ev = src?.data, !ev.isDisjoint(with: [.rename, .delete]) { self.watchFolder() }
+            self.scheduleRefresh()
+        }
+        src.setCancelHandler { close(fd) }
+        src.resume(); source = src
+    }
     func locateIfAuto() { if config.locationSource != "manual" { locator.request() } }
     func useMyLocation() { config.locationSource = "auto"; saveConfig(reapply: false); locator.request() }
 
@@ -499,8 +512,7 @@ final class Model: ObservableObject {
         liveQueue.async { [weak self] in
             let sun = cli("suntimes").trimmingCharacters(in: .whitespacesAndNewlines)
             let status = cli("status")
-            let running = runStatus("/bin/launchctl", ["print", "gui/\(getuid())/\(agentLabel)"]).ok
-            DispatchQueue.main.async { guard let self = self else { return }; self.sunLine = sun; self.parseLive(status); self.agentRunning = running }
+            DispatchQueue.main.async { guard let self = self else { return }; self.sunLine = sun; self.parseLive(status) }
         }
     }
     /// Off and true colour both mean the display is drawn exactly as macOS would draw it, whatever shade.json says.
