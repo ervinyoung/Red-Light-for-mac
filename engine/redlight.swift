@@ -108,6 +108,8 @@ struct State: Codable {
     var disabled: Bool?
     /// True colour for a colour-critical app in front (e.g. "Figma"): the look is suspended, not changed.
     var heldFor: String?
+    /// When `night`/`day` ("Turn On Now") overrode the schedule. The override stands until the schedule next turns.
+    var forcedAt: Date?
 }
 struct Learned: Codable {
     var sunsetOffsetMinutes: Double = 0
@@ -548,7 +550,7 @@ func anythingRed() -> Bool {
     return ourTint || (sh.warmth ?? 0) > 0.001 || sh.enabled
 }
 func turnOff(_ st: inout State, cfg: Config, reason: String) {
-    st.disabled = true; st.pausedUntil = nil; st.ramp = nil; st.heldFor = nil
+    st.disabled = true; st.pausedUntil = nil; st.ramp = nil; st.heldFor = nil; st.forcedAt = nil
     apply(offLook(cfg: cfg, state: st), label: "OFF (\(reason))")
     st.mode = "day"; st.daySnapshot = nil
     st.lastSeen = readCurrent()
@@ -607,7 +609,12 @@ case "check":
     pruneEvents(olderThan: now.addingTimeInterval(-Double((cfg.learning ?? Learning()).lookbackDays + 7) * 86400))
     let newLearned = learn(cfg: cfg, learned: learned, state: &st, now: now)
     if (try? enc.encode(newLearned)) != (try? enc.encode(learned)) { saveLearned(newLearned); learned = newLearned }
-    let want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
+    var want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
+    if let f = st.forcedAt {
+        // "Turn On Now" by day (or `day` by night) holds until the next sunset or sunrise, not until the next minute.
+        if (lastTransition(cfg: cfg, learned: learned, now: now) ?? .distantPast) <= f && now.timeIntervalSince(f) < 86400 { want = st.mode }
+        else { st.forcedAt = nil }
+    }
     if st.mode != want {
         log("transition \(st.mode) -> \(want)")
         st = startTransition(to: want, cfg: cfg, learned: learned, state: st, now: now, fade: fadeMinutes, since: lastTransition(cfg: cfg, learned: learned, now: now))
@@ -621,10 +628,12 @@ case "night", "day":
     st?.pausedUntil = nil
     if cmd == "night" { st?.disabled = false }      // "Turn On Now" is, plainly, on
     st?.heldFor = nil
-    saveState(startTransition(to: cmd, cfg: cfg, learned: learned, state: st, now: now, fade: 0))
+    var next = startTransition(to: cmd, cfg: cfg, learned: learned, state: st, now: now, fade: 0)
+    next.forcedAt = now                         // otherwise the next check puts the schedule straight back
+    saveState(next)
 case "on":
     var st = loadState() ?? blank()
-    st.disabled = false; st.pausedUntil = nil; st.heldFor = nil
+    st.disabled = false; st.pausedUntil = nil; st.heldFor = nil; st.forcedAt = nil
     let want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
     // Always apply, even if the mode already matches: "on" must leave the screen in the state the switch shows.
     st = startTransition(to: want, cfg: cfg, learned: learned, state: st, now: now, fade: 0)
@@ -651,7 +660,7 @@ case "pause":
     // redlight pause <minutes> | sunrise
     refuseIfOff()
     var st = loadState() ?? blank()
-    st.heldFor = nil
+    st.heldFor = nil; st.forcedAt = nil
     let arg = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "60"
     let until: Date
     if arg == "sunrise" { until = nextSunrise(cfg: cfg, learned: learned, now: now) ?? now.addingTimeInterval(8 * 3600) }
@@ -662,7 +671,7 @@ case "pause":
     saveState(st); log("paused until \(fmt.string(from: until))"); print("paused until \(fmt.string(from: until))")
 case "resume":
     var st = loadState() ?? blank()
-    st.pausedUntil = nil; st.disabled = false; st.heldFor = nil
+    st.pausedUntil = nil; st.disabled = false; st.heldFor = nil; st.forcedAt = nil
     let want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
     if st.mode != want { st = startTransition(to: want, cfg: cfg, learned: learned, state: st, now: now, fade: 0) }
     saveState(st); log("resumed"); print("resumed (\(want))")
