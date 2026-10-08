@@ -488,14 +488,15 @@ func nightPreset(cfg: Config, learned: Learned) -> Settings {
 func dayLook(cfg: Config, state: State?) -> Settings {
     var restore = cfg.dayDefaults
     restore.warmth = restore.warmth ?? 0
+    restore.shadeEnabled = restore.shadeEnabled ?? false
     restore.filterEnabled = nil; restore.intensity = nil; restore.filterType = nil; restore.hue = nil
+    // The snapshot brings back your daytime keyboard — not red shift or shade. It is taken at sunset, so it holds
+    // whatever was turned on in the evening (the early start learning watches for, a "Wind down" or "Movie" preset),
+    // and restoring that left the whole next day red or dimmed, sunset after sunset.
     if let snap = state?.daySnapshot {
         restore.keyboardBrightness = snap.keyboardBrightness ?? restore.keyboardBrightness
         restore.keyboardIdleDimSeconds = snap.keyboardIdleDimSeconds ?? restore.keyboardIdleDimSeconds
         restore.keyboardAutoBrightness = snap.keyboardAutoBrightness ?? restore.keyboardAutoBrightness
-        restore.shadeEnabled = snap.shadeEnabled ?? false
-        restore.shadeLevel = snap.shadeLevel ?? restore.shadeLevel
-        restore.warmth = snap.warmth ?? 0
     }
     return restore
 }
@@ -507,7 +508,7 @@ func startTransition(to mode: String, cfg: Config, learned: Learned, state: Stat
     let target: Settings
     if mode == "night" {
         switch st.mode {
-        case "day": st.daySnapshot = readCurrent()
+        case "day": st.daySnapshot = st.ramp?.to ?? readCurrent()   // mid-sunrise (woken at night): where it was going, not a half-faded frame
         case "night": break
         default: st.daySnapshot = nil
         }
@@ -679,6 +680,7 @@ case "pause":
     else if let m = Double(arg), m > 0 { until = now.addingTimeInterval(m * 60) }
     else { print("usage: redlight pause <minutes>|sunrise"); exit(2) }
     if st.mode == "night" { st = startTransition(to: "day", cfg: cfg, learned: learned, state: st, now: now, fade: 0) }
+    else if st.ramp != nil { stepRamp(&st, now: .distantFuture) }   // mid-sunrise: finish it, don't freeze half red
     st.pausedUntil = until
     saveState(st); log("paused until \(fmt.string(from: until))"); print("paused until \(fmt.string(from: until))")
 case "resume":
