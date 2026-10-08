@@ -459,11 +459,16 @@ final class Model: ObservableObject {
     var plistPath: String { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(agentLabel).plist").path }
     /// The agent is always loaded now. Builds before this one expressed "off" by unloading it, so an unloaded
     /// agent with no recorded switch is carried over as off before it is loaded again.
+    /// Once only, on this build's first launch: "on" is recorded as no `disabled` at all, so later an unloaded agent
+    /// (a login-order race, Background Items switched off in System Settings) is indistinguishable from the old off,
+    /// and reading it that way would switch Red Light off by itself.
     func ensureAgent() {
+        let migrate = !UserDefaults.standard.bool(forKey: "switchCarriedOver")
+        UserDefaults.standard.set(true, forKey: "switchCarriedOver")
         let label = "gui/\(getuid())/\(agentLabel)"
         guard FileManager.default.fileExists(atPath: plistPath), !runStatus("/bin/launchctl", ["print", label]).ok else { return }
         let st = (try? Data(contentsOf: stateURL)).flatMap { try? dec.decode(ModeState.self, from: $0) }
-        if let st = st, st.disabled == nil { _ = runStatus(cliURL.path, ["off"]) }
+        if migrate, let st = st, st.disabled == nil { _ = runStatus(cliURL.path, ["off"]) }
         _ = runStatus("/bin/launchctl", ["bootstrap", "gui/\(getuid())", plistPath])
     }
     func locateIfAuto() { if config.locationSource != "manual" { locator.request() } }
