@@ -1,16 +1,33 @@
 #!/bin/zsh
 # Red Light installer: builds the engine and the menu bar app from source, seeds a config, starts the agent.
 # Requires: Apple silicon Mac, macOS 26 or later, Xcode Command Line Tools (xcode-select --install).
+# Re-running it updates an install in place: config, learned adjustments and the master switch are kept.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DIR="$HOME/Library/Application Support/RedLight"
+LABEL="com.ervinyoung.redlight"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 mkdir -p "$DIR/gui" "$HOME/Library/LaunchAgents"
 echo "→ building engine"
 cp "$HERE/engine/redlight.swift" "$DIR/redlight.swift"
-swiftc -O "$DIR/redlight.swift" -o "$DIR/redlight"
+# Built beside and moved into place, so a check the agent is running right now never sees a half-written binary.
+swiftc -O "$DIR/redlight.swift" -o "$DIR/redlight.new"
+mv -f "$DIR/redlight.new" "$DIR/redlight"
 echo "→ building app"
-cp "$HERE/app/RedLightApp.swift" "$HERE/app/Info.plist" "$HERE/app/build.sh" "$DIR/gui/"
+cp -R "$HERE/app/." "$DIR/gui/"
 chmod +x "$DIR/gui/build.sh"; "$DIR/gui/build.sh"
+# A copy that is already running keeps the old build until it quits; and with two running, the new one exits.
+if pgrep -x RedLight >/dev/null; then
+  pkill -x RedLight || true
+  for i in {1..20}; do pgrep -x RedLight >/dev/null || break; sleep 0.25; done
+fi
+# Earlier installers put the app in ~/Applications. Two copies with one bundle identifier confuse Launch at Login
+# and Spotlight, and whichever starts first makes the other quit.
+OLD="$HOME/Applications/Red Light.app"
+if [ -d "$OLD" ] && [ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$OLD/Contents/Info.plist" 2>/dev/null)" = "$LABEL" ]; then
+  echo "→ removing the old copy in ~/Applications"
+  rm -rf "$OLD"
+fi
 if [ ! -f "$DIR/config.json" ]; then
   echo "→ writing default config (location will be resolved by the app; edit config.json to override)"
   # Until the app has a real fix, guess the sun from the time zone's own coordinates (zone.tab: ±DDMM[SS]±DDDMM[SS]).
@@ -43,14 +60,19 @@ JSON
   mv -f "$DIR/config.json.new" "$DIR/config.json"
 fi
 echo "→ installing the sunrise/sunset agent"
-PLIST="$HOME/Library/LaunchAgents/com.ervinyoung.redlight.plist"
+# Builds before the switch moved into the engine said "off" by unloading the agent. Keep that off, as the app would,
+# rather than quietly turning Red Light back on by loading the agent again.
+if [ -f "$PLIST" ] && [ -f "$DIR/state.json" ] && ! grep -q '"disabled"' "$DIR/state.json" \
+   && ! launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
+  "$DIR/redlight" off || true
+fi
 # stdout goes nowhere: everything `check` prints is already in redlight.log, and launchd.out.log only ever grew.
 # AbandonProcessGroup: launchd otherwise kills the osascript a check spawns for its "Adjusted…" notification.
 cat > "$PLIST" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>com.ervinyoung.redlight</string>
+  <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key><array><string>$DIR/redlight</string><string>check</string></array>
   <key>RunAtLoad</key><true/>
   <key>StartInterval</key><integer>60</integer>
@@ -60,9 +82,10 @@ cat > "$PLIST" <<PL
 </dict></plist>
 PL
 rm -f "$DIR/launchd.out.log"
-launchctl bootout "gui/$(id -u)/com.ervinyoung.redlight" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
-ln -sf "$DIR/redlight" "$DIR/sunmode"
+launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+# bootout returns before the old job is gone, and bootstrap fails ("Input/output error") until it is.
+for i in {1..20}; do launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null && break; sleep 0.25; done
+launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || { echo "could not load the agent: launchctl bootstrap gui/$(id -u) \"$PLIST\""; exit 1; }
 open "/Applications/Red Light.app"
 echo
 echo "Red Light is installed. Look for the sunset icon in the menu bar."
