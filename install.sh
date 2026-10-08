@@ -36,6 +36,8 @@ JSON
 fi
 echo "→ installing the sunrise/sunset agent"
 PLIST="$HOME/Library/LaunchAgents/com.ervinyoung.redlight.plist"
+# stdout goes nowhere: everything `check` prints is already in redlight.log, and launchd.out.log only ever grew.
+# AbandonProcessGroup: launchd otherwise kills the osascript a check spawns for its "Adjusted…" notification.
 cat > "$PLIST" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -44,10 +46,12 @@ cat > "$PLIST" <<PL
   <key>ProgramArguments</key><array><string>$DIR/redlight</string><string>check</string></array>
   <key>RunAtLoad</key><true/>
   <key>StartInterval</key><integer>60</integer>
-  <key>StandardOutPath</key><string>$DIR/launchd.out.log</string>
+  <key>AbandonProcessGroup</key><true/>
+  <key>StandardOutPath</key><string>/dev/null</string>
   <key>StandardErrorPath</key><string>$DIR/launchd.err.log</string>
 </dict></plist>
 PL
+rm -f "$DIR/launchd.out.log"
 launchctl bootout "gui/$(id -u)/com.ervinyoung.redlight" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 ln -sf "$DIR/redlight" "$DIR/sunmode"
