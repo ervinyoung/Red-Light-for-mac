@@ -443,7 +443,7 @@ final class Model: ObservableObject {
     func refresh() {
         if let d = try? Data(contentsOf: configURL), let c = try? dec.decode(Config.self, from: d) {
             let hk = c.shortcuts ?? Shortcuts(), old = config.shortcuts ?? Shortcuts()
-            config = c
+            config = c; diskConfig = c
             if hk.toggleShade != old.toggleShade || hk.shadeDown != old.shadeDown || hk.shadeUp != old.shadeUp { registerHotkeys() }
         }
         state = (try? Data(contentsOf: stateURL)).flatMap { try? dec.decode(ModeState.self, from: $0) }
@@ -480,8 +480,18 @@ final class Model: ObservableObject {
         return parts[i].components(separatedBy: "switch ").last?.replacingOccurrences(of: ")", with: "") ?? ""
     }
 
+    /// config.json as last read. The engine writes the same file (location, presets), so saving writes back only the
+    /// top-level keys changed here since that read, onto what is on disk now — never a stale whole copy over the
+    /// engine's write, and never this model's placeholder defaults over a file it could not read.
+    private var diskConfig: Config?
     func saveConfig(reapply: Bool = true) {
-        try? enc.encode(config).write(to: configURL, options: .atomic)
+        func obj(_ d: Data?) -> [String: Any]? { d.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } }
+        if let base = diskConfig, let was = obj(try? enc.encode(base)), let mine = obj(try? enc.encode(config)),
+           var disk = obj(try? Data(contentsOf: configURL)) {
+            for k in Set(was.keys).union(mine.keys) where !NSArray(array: [was[k] ?? NSNull()]).isEqual(to: [mine[k] ?? NSNull()]) { disk[k] = mine[k] }
+            if let d = try? JSONSerialization.data(withJSONObject: disk), let merged = try? dec.decode(Config.self, from: d),
+               (try? enc.encode(merged).write(to: configURL, options: .atomic)) != nil { config = merged; diskConfig = merged }
+        } else { NSLog("Red Light: config.json unreadable; not saving over it") }
         if reapply && isNight { runCLI(["reapply"]) } else { scheduleRefresh(after: 0.05) }
     }
     func runCLI(_ args: [String]) {
@@ -496,7 +506,8 @@ final class Model: ObservableObject {
     func forget() { runCLI(["forget"]) }
     func setShade(enabled: Bool? = nil, level: Double? = nil) {
         guard !isOff else { return }
-        var s = shade
+        // From disk, not the last refresh: the engine may have written warmth and gamma since (a fade step).
+        var s = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? shade
         if let e = enabled { s.enabled = e }
         if let l = level { s.level = max(0, min(0.9, l)); if l > 0 && enabled == nil { s.enabled = true } }
         shade = s; overlay.apply(s)
