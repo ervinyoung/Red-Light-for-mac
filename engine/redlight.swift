@@ -489,7 +489,7 @@ func dayLook(cfg: Config, state: State?) -> Settings {
 // MARK: - Transitions
 /// Begin (or instantly complete) a transition. `fade` = 0 applies the target at once.
 func startTransition(to mode: String, cfg: Config, learned: Learned, state: State?, now: Date, fade: Double, since: Date? = nil) -> State {
-    var st = state ?? State(mode: "unset", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil)
+    var st = state ?? blank()
     let target: Settings
     if mode == "night" {
         switch st.mode {
@@ -559,7 +559,9 @@ func restoreTint() {
     let c = warmthCurve(loadShade().warmth ?? 0)
     maSetType(colorCategory, 16); maSetHue(1.0); maSetInten(c.tint); maSetEnabled(colorCategory, c.tint > 0.001)
 }
-func blank() -> State { State(mode: "unset", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil) }
+/// The switch is recorded as on (`false`), never left nil: the app reads a missing `disabled` as a build from before
+/// the switch, which said "off" by unloading the agent, and would turn Red Light off whenever it found the agent unloaded.
+func blank() -> State { var s = State(mode: "unset", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil); s.disabled = false; return s }
 func refuseIfOff() {
     if loadState()?.disabled == true { print("Red Light is off. Turn it on first: redlight on"); exit(1) }
 }
@@ -588,6 +590,7 @@ case "check":
         if anythingRed() { apply(offLook(cfg: cfg, state: st), label: "OFF (held)"); st.lastSeen = readCurrent() }
         saveState(st); exit(0)
     }
+    st.disabled = false                 // on, and now recorded as on (see blank())
     if let until = st.pausedUntil {
         if now < until { saveState(st); exit(0) }       // paused: leave everything alone, learn nothing
         st.pausedUntil = nil; log("pause ended")
@@ -611,12 +614,12 @@ case "check":
 case "night", "day":
     var st = loadState()
     st?.pausedUntil = nil
-    if cmd == "night" { st?.disabled = nil }      // "Turn On Now" is, plainly, on
+    if cmd == "night" { st?.disabled = false }      // "Turn On Now" is, plainly, on
     st?.heldFor = nil
     saveState(startTransition(to: cmd, cfg: cfg, learned: learned, state: st, now: now, fade: 0))
 case "on":
     var st = loadState() ?? blank()
-    st.disabled = nil; st.pausedUntil = nil; st.heldFor = nil
+    st.disabled = false; st.pausedUntil = nil; st.heldFor = nil
     let want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
     // Always apply, even if the mode already matches: "on" must leave the screen in the state the switch shows.
     st = startTransition(to: want, cfg: cfg, learned: learned, state: st, now: now, fade: 0)
@@ -654,7 +657,7 @@ case "pause":
     saveState(st); log("paused until \(fmt.string(from: until))"); print("paused until \(fmt.string(from: until))")
 case "resume":
     var st = loadState() ?? blank()
-    st.pausedUntil = nil; st.disabled = nil; st.heldFor = nil
+    st.pausedUntil = nil; st.disabled = false; st.heldFor = nil
     let want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
     if st.mode != want { st = startTransition(to: want, cfg: cfg, learned: learned, state: st, now: now, fade: 0) }
     saveState(st); log("resumed"); print("resumed (\(want))")
