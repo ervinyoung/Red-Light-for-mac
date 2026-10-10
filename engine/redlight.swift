@@ -122,6 +122,8 @@ struct State: Codable {
     var disabled: Bool?
     /// True colour for a colour-critical app in front (e.g. "Figma"): the look is suspended, not changed.
     var heldFor: String?
+    /// A tint set by hand (`set tint`) that was on when the hold began; Red Shift's own tint is recomputed instead.
+    var customTintHeld: Bool?
     /// When `night`/`day` ("Turn On Now") overrode the schedule. The override stands until the schedule next turns.
     var forcedAt: Date?
 }
@@ -620,7 +622,7 @@ func anythingRed() -> Bool {
     return ourTint || (sh.warmth ?? 0) > 0.001 || sh.enabled
 }
 func turnOff(_ st: inout State, cfg: Config, reason: String) {
-    st.disabled = true; st.pausedUntil = nil; st.ramp = nil; st.heldFor = nil; st.forcedAt = nil
+    st.disabled = true; st.pausedUntil = nil; st.ramp = nil; st.heldFor = nil; st.customTintHeld = nil; st.forcedAt = nil
     apply(offLook(cfg: cfg, state: st), label: "OFF (\(reason))")
     st.mode = "day"; st.daySnapshot = nil
     st.lastSeen = readCurrent()
@@ -629,7 +631,15 @@ func turnOff(_ st: inout State, cfg: Config, reason: String) {
 func suppressTint() { if maGetType(colorCategory) == 16 { maSetEnabled(colorCategory, false) } }
 /// Brings back the tint underneath — the curve's or a custom `set tint` — from the filter prefs, which apply keeps
 /// current under a hold. Recomputing it from warmth replaced a custom tint, and forced type 16 over a filter of your own.
-func restoreTint() { if maGetType(colorCategory) == 16 { maSetEnabled(colorCategory, maGetInten() > 0.001) } }
+/// After a hold: Red Shift's tint leg as the current warmth calls for it (a fade may have run underneath), or a
+/// hand-set tint that was on before. Never "intensity > 0": macOS keeps the last intensity even when the tint is
+/// off, so that test switched a 0.25 tint back on at Red Shift 38 %, where the curve has no tint at all.
+func restoreTint(custom: Bool) {
+    guard maGetType(colorCategory) == 16 else { return }
+    let c = warmthCurve(loadShade().warmth ?? 0)
+    if custom { maSetEnabled(colorCategory, true) }
+    else { maSetHue(1.0); maSetInten(c.tint); maSetEnabled(colorCategory, c.tint > 0.001) }
+}
 /// The switch is recorded as on (`false`), never left nil: the app reads a missing `disabled` as a build from before
 /// the switch, which said "off" by unloading the agent, and would turn Red Light off whenever it found the agent unloaded.
 func blank() -> State { var s = State(mode: "unset", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil); s.disabled = false; return s }
@@ -709,13 +719,13 @@ case "night", "day":
     var st = loadState()
     st?.pausedUntil = nil
     if cmd == "night" { st?.disabled = false }      // "Turn On Now" is, plainly, on
-    st?.heldFor = nil
+    st?.heldFor = nil; st?.customTintHeld = nil
     var next = startTransition(to: cmd, cfg: cfg, learned: learned, state: st, now: now, fade: 0)
     next.forcedAt = now                         // otherwise the next check puts the schedule straight back
     saveState(next)
 case "on":
     var st = loadState() ?? blank()
-    st.disabled = false; st.pausedUntil = nil; st.heldFor = nil; st.forcedAt = nil
+    st.disabled = false; st.pausedUntil = nil; st.heldFor = nil; st.customTintHeld = nil; st.forcedAt = nil
     let want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
     // Always apply, even if the mode already matches: "on" must leave the screen in the state the switch shows.
     st = startTransition(to: want, cfg: cfg, learned: learned, state: st, now: now, fade: 0)
@@ -732,20 +742,24 @@ case "hold":
     st.heldFor = CommandLine.arguments[2]
     // Only the tint flag is ours to re-read: a whole fresh lastSeen swallowed a slider or shade change made in the
     // minute before, so the fade's next step ran straight over it (the app writes the shade before its release lands).
+    if st.customTintHeld == nil {   // first hold of a run; a hold passed from one app to the next keeps it
+        st.customTintHeld = maGetEnabled(colorCategory) && maGetType(colorCategory) == 16 && warmthCurve(loadShade().warmth ?? 0).tint <= 0.001
+    }
     suppressTint(); st.lastSeen?.filterEnabled = maGetEnabled(colorCategory)
     saveState(st); log("true colour for \(st.heldFor!)")
 case "release":
     var st = loadState() ?? blank()
     guard let who = st.heldFor else { exit(0) }
     st.heldFor = nil
-    if st.disabled != true { restoreTint() }
+    if st.disabled != true { restoreTint(custom: st.customTintHeld == true) }
+    st.customTintHeld = nil
     st.lastSeen?.filterEnabled = maGetEnabled(colorCategory)   // as in hold: the tint flag only
     saveState(st); log("red light back after \(who)")
 case "pause":
     // redlight pause <minutes> | sunrise
     refuseIfOff()
     var st = loadState() ?? blank()
-    st.heldFor = nil; st.forcedAt = nil
+    st.heldFor = nil; st.customTintHeld = nil; st.forcedAt = nil
     let arg = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "60"
     let until: Date
     if arg == "sunrise" { until = nextSunrise(cfg: cfg, learned: learned, now: now) ?? now.addingTimeInterval(8 * 3600) }
@@ -763,7 +777,7 @@ case "pause":
     saveState(st); log("paused until \(fmt.string(from: until))"); print("paused until \(fmt.string(from: until))")
 case "resume":
     var st = loadState() ?? blank()
-    st.pausedUntil = nil; st.disabled = false; st.heldFor = nil; st.forcedAt = nil
+    st.pausedUntil = nil; st.disabled = false; st.heldFor = nil; st.customTintHeld = nil; st.forcedAt = nil
     let want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
     if st.mode != want { st = startTransition(to: want, cfg: cfg, learned: learned, state: st, now: now, fade: 0) }
     else { st.lastSeen = readCurrent() }        // as when a pause runs out: changes made while paused aren't learned
