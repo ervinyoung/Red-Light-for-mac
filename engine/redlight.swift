@@ -314,8 +314,13 @@ func transitions(cfg: Config, learned: Learned, now: Date) -> [(at: Date, night:
 }
 func isNight(cfg: Config, learned: Learned, now: Date) -> Bool {
     let ts = transitions(cfg: cfg, learned: learned, now: now)
-    if let last = ts.last(where: { $0.at <= now }) { return last.night }
-    if let next = ts.first { return !next.night }
+    // A day with no sunrise or sunset is polar day or night throughout, whatever the switches around it say: the midnight
+    // sun's last day is followed by a sunrise, and reading that as "night until then" kept the screen red all day.
+    let today = sunTimes(lat: cfg.latitude, lon: cfg.longitude, date: now)
+    if today.rise != nil || today.set != nil {
+        if let last = ts.last(where: { $0.at <= now }) { return last.night }
+        if let next = ts.first { return !next.night }   // a location far east of the Mac's zone: its day starts later
+    }
     let m = Calendar.current.component(.month, from: now)   // polar day or night: no sunrise or sunset for days
     return cfg.latitude > 0 ? (m >= 10 || m <= 3) : (m >= 4 && m <= 9)
 }
