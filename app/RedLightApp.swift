@@ -562,8 +562,10 @@ final class Updater: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: "autoUpdate"); objectWillChange.send() }
     }
     static var current: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
+    /// Each dotted part counts by its leading digits, so "2.4-beta" is 2.4 (not 2.0) and "2.4.0-rc1" is 2.4.0.
     static func newer(_ a: String, than b: String) -> Bool {
-        let x = a.split(separator: ".").map { Int($0) ?? 0 }, y = b.split(separator: ".").map { Int($0) ?? 0 }
+        func parts(_ s: String) -> [Int] { s.split(separator: ".").map { Int($0.prefix { $0.isASCII && $0.isNumber }) ?? 0 } }
+        let x = parts(a), y = parts(b)
         for i in 0..<max(x.count, y.count) { let p = i < x.count ? x[i] : 0, q = i < y.count ? y[i] : 0; if p != q { return p > q } }
         return false
     }
