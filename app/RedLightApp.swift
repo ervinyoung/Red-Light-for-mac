@@ -486,11 +486,21 @@ enum Setup {
 
         """
         // Missing, or written by an older installer (one before AbandonProcessGroup killed the agent's notifications and
-        // logged stdout to an ever-growing file). Compared as plists, so install.sh's own copy is left alone. A loaded
-        // agent is not reloaded here (ensureAgent reads "unloaded" as a pre-switch "off"); launchd reads it at next login.
+        // logged stdout to an ever-growing file). Compared as plists, so install.sh's own copy is left alone.
         func dict(_ d: Data?) -> NSDictionary? { d.flatMap { try? PropertyListSerialization.propertyList(from: $0, format: nil) as? NSDictionary } }
-        if dict(fm.contents(atPath: plistURL.path)) != dict(plist.data(using: .utf8)) {
-            do { try plist.write(to: plistURL, atomically: true, encoding: .utf8) } catch { NSLog("Red Light: can’t write \(plistURL.path): \(error)") }
+        let old = fm.contents(atPath: plistURL.path)
+        if dict(old) != dict(plist.data(using: .utf8)) {
+            do { try plist.write(to: plistURL, atomically: true, encoding: .utf8) } catch { NSLog("Red Light: can’t write \(plistURL.path): \(error)"); return }
+            try? fm.removeItem(at: appDir.appendingPathComponent("launchd.out.log"))
+            // A loaded agent keeps the old definition until reloaded. It was loaded, so Red Light was on: ensureAgent's
+            // one-time carry-over (which reads an unloaded agent as a pre-switch "off") has nothing to carry.
+            let job = "gui/\(getuid())/\(agentLabel)"
+            if old != nil, runStatus("/bin/launchctl", ["print", job]).ok {
+                UserDefaults.standard.set(true, forKey: "switchCarriedOver")
+                _ = runStatus("/bin/launchctl", ["bootout", job])
+                // bootout returns before the job is gone, and bootstrap fails until it is (as in install.sh).
+                for _ in 0..<20 { if runStatus("/bin/launchctl", ["bootstrap", "gui/\(getuid())", plistURL.path]).ok { break }; usleep(250_000) }
+            }
         }
     }
     /// Until Location Services answers, the sun is guessed from the time zone's own coordinates (zone.tab).
