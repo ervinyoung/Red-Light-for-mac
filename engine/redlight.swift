@@ -708,14 +708,16 @@ case "hold":
     var st = loadState() ?? blank()
     guard st.disabled != true, CommandLine.arguments.count > 2 else { exit(0) }
     st.heldFor = CommandLine.arguments[2]
-    suppressTint(); st.lastSeen = readCurrent()
+    // Only the tint flag is ours to re-read: a whole fresh lastSeen swallowed a slider or shade change made in the
+    // minute before, so the fade's next step ran straight over it (the app writes the shade before its release lands).
+    suppressTint(); st.lastSeen?.filterEnabled = maGetEnabled(colorCategory)
     saveState(st); log("true colour for \(st.heldFor!)")
 case "release":
     var st = loadState() ?? blank()
     guard let who = st.heldFor else { exit(0) }
     st.heldFor = nil
     if st.disabled != true { restoreTint() }
-    st.lastSeen = readCurrent()
+    st.lastSeen?.filterEnabled = maGetEnabled(colorCategory)   // as in hold: the tint flag only
     saveState(st); log("red light back after \(who)")
 case "pause":
     // redlight pause <minutes> | sunrise
