@@ -291,7 +291,7 @@ final class TrueColorWatcher {
     private var declinedHere: String?          // "Bring Red Light Back" pressed while this app stays in front
     private var lastFront: String?             // the last app in front other than this one (opening the pane activates us)
     private var releaseWork: DispatchWorkItem?
-    private var lastMode: String?
+    private var askedNight: Date?              // the evening askedTonight belongs to
     private let prompt = TrueColorPrompt()
     init(model: Model) {
         m = model
@@ -322,9 +322,13 @@ final class TrueColorWatcher {
     }
     /// Called on every refresh: a new night clears the once-a-night memory, and if red light has just begun
     /// while a colour-critical app is already in front, that app gets the same treatment as if it had just opened.
+    /// A night is the evening's date (1 AM still belongs to the night before), not a change of mode: a pause or
+    /// off-and-on mid-evening goes through "day" and asked again, and a lid shut from 1 AM until the next evening
+    /// never sees "day" at all, so it never asked again.
     func reconsider() {
         guard !m.snapshotMode else { return }
-        if let mode = m.state?.mode, mode != lastMode { if mode == "night" { askedTonight = [] }; lastMode = mode }
+        let night = Calendar.current.startOfDay(for: Date().addingTimeInterval(-12 * 3600))
+        if night != askedNight { askedTonight = []; askedNight = night }
         if let app = NSWorkspace.shared.frontmostApplication { consider(app) }
     }
     /// The pane's button is pressed with the pane in front, so the app being declined is the one that was in front
