@@ -485,7 +485,13 @@ enum Setup {
         </dict></plist>
 
         """
-        if !fm.fileExists(atPath: plistURL.path) { try? plist.write(to: plistURL, atomically: true, encoding: .utf8) }
+        // Missing, or written by an older installer (one before AbandonProcessGroup killed the agent's notifications and
+        // logged stdout to an ever-growing file). Compared as plists, so install.sh's own copy is left alone. A loaded
+        // agent is not reloaded here (ensureAgent reads "unloaded" as a pre-switch "off"); launchd reads it at next login.
+        func dict(_ d: Data?) -> NSDictionary? { d.flatMap { try? PropertyListSerialization.propertyList(from: $0, format: nil) as? NSDictionary } }
+        if dict(fm.contents(atPath: plistURL.path)) != dict(plist.data(using: .utf8)) {
+            do { try plist.write(to: plistURL, atomically: true, encoding: .utf8) } catch { NSLog("Red Light: can’t write \(plistURL.path): \(error)") }
+        }
     }
     /// Until Location Services answers, the sun is guessed from the time zone's own coordinates (zone.tab).
     static func timezoneCoordinates() -> (Double, Double) {
