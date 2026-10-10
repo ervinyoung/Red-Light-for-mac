@@ -374,31 +374,36 @@ func loadEvents(since: Date) -> [Event] {
 }
 
 // MARK: - Observing manual changes
-/// Returns the updated state and how many manual changes were noticed since the last check.
-func observe(cfg: Config, learned: Learned, state: State, now: Date) -> (State, Int) {
+/// Returns the updated state and which fields were changed by hand since the last check. Changes are noticed even
+/// with learning off — a fade must not run over them — and recorded for learning only when it is on.
+func observe(cfg: Config, learned: Learned, state: State, now: Date) -> (State, Set<String>) {
     var st = state
     let cur = readCurrent()
     st.lastSeen = cur
-    guard cfg.learning?.enabled ?? true, let prev = state.lastSeen else { return (st, 0) }
+    guard let prev = state.lastSeen else { return (st, []) }
+    let record = cfg.learning?.enabled ?? true
     let (rise, set) = sunTimes(cfg: cfg, learned: learned, near: now)
     let dayFmt = DateFormatter(); dayFmt.dateFormat = "yyyy-MM-dd"
     let todayRise = sunTimes(lat: cfg.latitude, lon: cfg.longitude, date: now).rise ?? now
     let nightID = dayFmt.string(from: now < todayRise ? day(-1, from: now) : now)
-    var count = 0
+    var fields: Set<String> = []
     func changed(_ field: String, _ a: Double?, _ b: Double?, tol: Double) {
         guard let a = a, let b = b, abs(a - b) > tol else { return }
+        fields.insert(field)
         let ev = Event(t: now, mode: state.mode, nightID: nightID, minsFromSunset: now.timeIntervalSince(set) / 60,
                        minsFromSunrise: now.timeIntervalSince(rise) / 60, field: field, from: a, to: b)
-        appendEvent(ev); count += 1
+        if record { appendEvent(ev) }
         log("noticed manual change: \(field) \(String(format: "%.3f", a)) -> \(String(format: "%.3f", b)) (\(state.mode), \(Int(ev.minsFromSunset)) min after sunset)")
     }
     changed("warmth", prev.warmth, cur.warmth, tol: 0.02)
-    changed("filterEnabled", prev.filterEnabled.map { $0 ? 1 : 0 }, cur.filterEnabled.map { $0 ? 1 : 0 }, tol: 0.5)
+    // The tint leg follows warmth across 60 %: easing red from 80 % to 50 % is one change, not also "switched the
+    // filter off" — which the timing rules would read as turning red light off and move sunrise or sunset.
+    if prev.warmth == cur.warmth { changed("filterEnabled", prev.filterEnabled.map { $0 ? 1 : 0 }, cur.filterEnabled.map { $0 ? 1 : 0 }, tol: 0.5) }
     changed("keyboardBrightness", prev.keyboardBrightness, cur.keyboardBrightness, tol: 0.005)
     changed("keyboardIdleDimSeconds", prev.keyboardIdleDimSeconds, cur.keyboardIdleDimSeconds, tol: 0.5)
     changed("shadeEnabled", prev.shadeEnabled.map { $0 ? 1 : 0 }, cur.shadeEnabled.map { $0 ? 1 : 0 }, tol: 0.5)
     changed("shadeLevel", prev.shadeLevel, cur.shadeLevel, tol: 0.02)
-    return (st, count)
+    return (st, fields)
 }
 
 // MARK: - Learning
@@ -534,6 +539,19 @@ func startTransition(to mode: String, cfg: Config, learned: Learned, state: Stat
     st.lastSeen = readCurrent()
     return st
 }
+/// Fixes the hand-changed fields of a fade at their current values; the rest carry on easing.
+func pin(_ r: inout Ramp, _ fields: Set<String>, at cur: Settings) {
+    if fields.contains("warmth") { r.from.warmth = cur.warmth; r.to.warmth = cur.warmth }
+    if fields.contains("keyboardBrightness") {
+        r.from.keyboardBrightness = cur.keyboardBrightness; r.to.keyboardBrightness = cur.keyboardBrightness
+        r.to.keyboardAutoBrightness = cur.keyboardAutoBrightness
+    }
+    if fields.contains("keyboardIdleDimSeconds") { r.to.keyboardIdleDimSeconds = cur.keyboardIdleDimSeconds }
+    if fields.contains("shadeEnabled") || fields.contains("shadeLevel") {
+        r.from.shadeEnabled = cur.shadeEnabled; r.from.shadeLevel = cur.shadeLevel
+        r.to.shadeEnabled = cur.shadeEnabled; r.to.shadeLevel = cur.shadeLevel
+    }
+}
 func stepRamp(_ st: inout State, now: Date) {
     guard let r = st.ramp else { return }
     let t = now.timeIntervalSince(r.start) / r.seconds
@@ -616,6 +634,7 @@ case "check":
     if let until = st.pausedUntil {
         if now < until { saveState(st); exit(0) }       // paused: leave everything alone, learn nothing
         st.pausedUntil = nil; log("pause ended")
+        st.lastSeen = nil               // what was changed while paused is not a lesson, nor a mid-fade adjustment
     }
     let held = st.heldFor != nil
     holdTint = held                     // transitions and fades carry on underneath a hold; only the tint waits
@@ -633,9 +652,17 @@ case "check":
     if st.mode != want {
         log("transition \(st.mode) -> \(want)")
         st = startTransition(to: want, cfg: cfg, learned: learned, state: st, now: now, fade: fadeMinutes, since: lastTransition(cfg: cfg, learned: learned, now: now))
-    } else if st.ramp != nil {
-        if changes > 0 { log("you adjusted something mid-transition; leaving it as you set it"); st.ramp = nil }
-        else { stepRamp(&st, now: now) }
+    } else if var r = st.ramp {
+        if changes.contains("filterEnabled") { log("you switched the tint mid-transition; leaving it as you set it"); st.ramp = nil }
+        else {
+            if !changes.isEmpty, let cur = st.lastSeen {
+                // Only what you touched stays where you put it. Cancelling the whole fade for a keyboard nudge left
+                // the screen stuck part-way to red for the rest of the night.
+                log("you adjusted \(changes.sorted().joined(separator: ", ")) mid-transition; leaving that as you set it")
+                pin(&r, changes, at: cur); st.ramp = r
+            }
+            stepRamp(&st, now: now)
+        }
     }
     saveState(st)
 case "night", "day":
@@ -690,6 +717,7 @@ case "resume":
     st.pausedUntil = nil; st.disabled = false; st.heldFor = nil; st.forcedAt = nil
     let want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
     if st.mode != want { st = startTransition(to: want, cfg: cfg, learned: learned, state: st, now: now, fade: 0) }
+    else { st.lastSeen = readCurrent() }        // as when a pause runs out: changes made while paused aren't learned
     saveState(st); log("resumed"); print("resumed (\(want))")
 case "location":
     // redlight location <lat> <lon> [auto|manual]
