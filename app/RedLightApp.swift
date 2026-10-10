@@ -35,6 +35,33 @@ struct Config: Codable {
     var learning: Learning?; var shortcuts: Shortcuts?; var presets: [Preset]?; var nightPresetName: String?
     var trueColor: TrueColor?
 }
+// A hand-edited block with a key left out (`"trueColor": {"always": [...]}`) must not make the whole file unreadable:
+// the pane would show built-in defaults and refuse to save. What is missing or malformed takes its default.
+extension Learning {
+    init(from d: Decoder) throws {
+        self.init(); guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }
+        enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? enabled
+        minNights = (try? c.decodeIfPresent(Int.self, forKey: .minNights)) ?? minNights
+        lookbackDays = (try? c.decodeIfPresent(Int.self, forKey: .lookbackDays)) ?? lookbackDays
+        maxOffsetMinutes = (try? c.decodeIfPresent(Double.self, forKey: .maxOffsetMinutes)) ?? maxOffsetMinutes
+    }
+}
+extension Shortcuts {
+    init(from d: Decoder) throws {
+        self.init(); guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }
+        toggleShade = (try? c.decodeIfPresent(Shortcut.self, forKey: .toggleShade)) ?? toggleShade
+        shadeDown = (try? c.decodeIfPresent(Shortcut.self, forKey: .shadeDown)) ?? shadeDown
+        shadeUp = (try? c.decodeIfPresent(Shortcut.self, forKey: .shadeUp)) ?? shadeUp
+    }
+}
+extension TrueColor {
+    init(from d: Decoder) throws {
+        self.init(); guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }
+        ask = (try? c.decodeIfPresent(Bool.self, forKey: .ask)) ?? ask
+        always = (try? c.decodeIfPresent([String].self, forKey: .always)) ?? always
+        never = (try? c.decodeIfPresent([String].self, forKey: .never)) ?? never
+    }
+}
 struct Ramp: Codable { var start: Date; var seconds: Double; var from: Settings; var to: Settings; var label: String }
 /// Written only by the engine. `disabled` is the master switch; `heldFor` names the app holding true colour.
 struct ModeState: Codable { var mode: String; var daySnapshot: Settings?; var lastSeen: Settings?; var lastNotified: Date?; var ramp: Ramp?; var pausedUntil: Date?
