@@ -411,6 +411,9 @@ func observe(cfg: Config, learned: Learned, state: State, now: Date) -> (State, 
     // filter off" — which the timing rules would read as turning red light off and move sunrise or sunset.
     if prev.warmth == cur.warmth { changed("filterEnabled", prev.filterEnabled.map { $0 ? 1 : 0 }, cur.filterEnabled.map { $0 ? 1 : 0 }, tol: 0.5) }
     changed("keyboardBrightness", prev.keyboardBrightness, cur.keyboardBrightness, tol: 0.005)
+    // Under auto-brightness the level isn't read, so a keyboard slider (auto off) or the system's own switch (auto on)
+    // went unseen and a fade turned it straight back. Not a lesson — one side has no level — but the fade must keep it.
+    if let a = prev.keyboardAutoBrightness, let b = cur.keyboardAutoBrightness, a != b { fields.insert("keyboardBrightness") }
     changed("keyboardIdleDimSeconds", prev.keyboardIdleDimSeconds, cur.keyboardIdleDimSeconds, tol: 0.5)
     changed("shadeEnabled", prev.shadeEnabled.map { $0 ? 1 : 0 }, cur.shadeEnabled.map { $0 ? 1 : 0 }, tol: 0.5)
     changed("shadeLevel", prev.shadeLevel, cur.shadeLevel, tol: 0.02)
