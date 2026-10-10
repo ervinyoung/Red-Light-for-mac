@@ -420,10 +420,10 @@ final class Model: ObservableObject {
     @Published var recording: String? = nil
     @Published var live = Settings()
     @Published var locationDenied = false
-    var snapshotMode = snapshotRun
+    var snapshotMode = isSnapshotRun
     var snapshotDaylight = false      // --snapshot … daylight, to capture the daytime state
     let overlay = ShadeOverlay()
-    lazy var gamma = Gamma()          // lazy: creating it resets every display, which a snapshot must never do
+    let gamma = Gamma()
     let locator = Locator()
     lazy var trueColor = TrueColorWatcher(model: self)
     let liveQueue = DispatchQueue(label: "redlight.live")
@@ -436,8 +436,9 @@ final class Model: ObservableObject {
     private var setsInFlight = 0
 
     init() {
-        // A documentation snapshot is a second process beside the running app: it only reads. No gamma, no shade
-        // windows (they would stack on the real ones), no hotkeys, no engine commands, no location prompt.
+        // A documentation snapshot is a second process beside the running app: it only reads. Gamma and the shade
+        // windows keep off the display themselves (isSnapshotRun); here: no hotkeys, no engine commands, no location
+        // prompt, and no true-colour watching that could send `hold`.
         guard !snapshotMode else { refresh(); return }
         ensureAgent()
         refresh()
@@ -540,7 +541,6 @@ final class Model: ObservableObject {
     private var holdsInFlight = 0
     var isTinting: Bool { !isOff && ((shade.warmth ?? 0) > 0.001 || shade.enabled) }
     func drawLook() {
-        guard !snapshotMode else { return }
         if isOff || heldFor != nil { overlay.apply(Shade()); gamma.apply(blue: 1, green: 1); return }
         overlay.apply(shade)
         gamma.apply(blue: shade.gammaBlue ?? 1, green: shade.gammaGreen ?? 1)
@@ -1145,8 +1145,6 @@ struct SettingsPage: View {
 }
 
 // MARK: - App
-/// This process was started only to render a documentation image (see snapshotIfRequested).
-let snapshotRun: Bool = { let a = CommandLine.arguments; return a.firstIndex(of: "--snapshot").map { $0 + 1 < a.count } ?? false }()
 func enforceSingleInstance() {
     let me = NSRunningApplication.current
     let others = NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == me.bundleIdentifier && $0.processIdentifier != me.processIdentifier }
