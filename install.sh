@@ -8,6 +8,14 @@ DIR="$HOME/Library/Application Support/RedLight"
 LABEL="com.ervinyoung.redlight"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 mkdir -p "$DIR/gui" "$HOME/Library/LaunchAgents"
+# Builds before the switch moved into the engine said "off" by unloading the agent. Keep that off, as the app would,
+# rather than quietly turning Red Light back on by loading the agent again. Decided now, before anything is replaced:
+# once the new engine is in place, any `check` (the old app's wake or location check, mid-build) records "on".
+CARRY_OFF=
+if [ -f "$PLIST" ] && [ -f "$DIR/state.json" ] && ! grep -q '"disabled"' "$DIR/state.json" \
+   && ! launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
+  CARRY_OFF=1
+fi
 echo "→ building engine"
 cp "$HERE/engine/redlight.swift" "$DIR/redlight.swift"
 # Built beside and moved into place, so a check the agent is running right now never sees a half-written binary.
@@ -60,12 +68,7 @@ JSON
   mv -f "$DIR/config.json.new" "$DIR/config.json"
 fi
 echo "→ installing the sunrise/sunset agent"
-# Builds before the switch moved into the engine said "off" by unloading the agent. Keep that off, as the app would,
-# rather than quietly turning Red Light back on by loading the agent again.
-if [ -f "$PLIST" ] && [ -f "$DIR/state.json" ] && ! grep -q '"disabled"' "$DIR/state.json" \
-   && ! launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
-  "$DIR/redlight" off || true
-fi
+if [ -n "$CARRY_OFF" ]; then "$DIR/redlight" off || true; fi
 # stdout goes nowhere: everything `check` prints is already in redlight.log, and launchd.out.log only ever grew.
 # AbandonProcessGroup: launchd otherwise kills the osascript a check spawns for its "Adjusted…" notification.
 cat > "$PLIST" <<PL
