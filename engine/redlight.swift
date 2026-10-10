@@ -651,8 +651,10 @@ if !["status", "suntimes", "learned", "curve"].contains(cmd) {
     while fd >= 0 && flock(fd, LOCK_EX | LOCK_NB) != 0 && waited < 500 { usleep(20_000); waited += 1 }   // hung run can't wedge the rest
 }
 // A config.json that won't parse stops the schedule (no location), but never the switch: off, true colour, and an
-// off check need nothing from it but the day defaults, and the plain normal look will do for those.
-let needsNoSun = ["off", "hold", "release"].contains(cmd) || (cmd == "check" && loadState()?.disabled == true)
+// off check need nothing from it but the day defaults, and the plain normal look will do for those. Sliders (`set`),
+// the shade keys, `forget` and `curve` read nothing from it at all, and refusing them left the pane's controls dead.
+// (Never `location` or `preset`: they save the config back, and would write this placeholder over the real one.)
+let needsNoSun = ["off", "hold", "release", "set", "shade", "forget", "curve"].contains(cmd) || (cmd == "check" && loadState()?.disabled == true)
 guard let cfg = loadConfig() ?? (needsNoSun ? Config(latitude: 0, longitude: 0, night: Settings(), dayDefaults: Settings()) : nil) else { exit(1) }
 var learned = loadLearned()
 let now = Date()
