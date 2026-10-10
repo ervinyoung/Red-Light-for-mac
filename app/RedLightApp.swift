@@ -35,6 +35,33 @@ struct Config: Codable {
     var learning: Learning?; var shortcuts: Shortcuts?; var presets: [Preset]?; var nightPresetName: String?
     var trueColor: TrueColor?
 }
+// A hand-edited block with a key left out (`"trueColor": {"always": [...]}`) must not make the whole file unreadable:
+// the pane would show built-in defaults and refuse to save. What is missing or malformed takes its default.
+extension Learning {
+    init(from d: Decoder) throws {
+        self.init(); guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }
+        enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? enabled
+        minNights = (try? c.decodeIfPresent(Int.self, forKey: .minNights)) ?? minNights
+        lookbackDays = (try? c.decodeIfPresent(Int.self, forKey: .lookbackDays)) ?? lookbackDays
+        maxOffsetMinutes = (try? c.decodeIfPresent(Double.self, forKey: .maxOffsetMinutes)) ?? maxOffsetMinutes
+    }
+}
+extension Shortcuts {
+    init(from d: Decoder) throws {
+        self.init(); guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }
+        toggleShade = (try? c.decodeIfPresent(Shortcut.self, forKey: .toggleShade)) ?? toggleShade
+        shadeDown = (try? c.decodeIfPresent(Shortcut.self, forKey: .shadeDown)) ?? shadeDown
+        shadeUp = (try? c.decodeIfPresent(Shortcut.self, forKey: .shadeUp)) ?? shadeUp
+    }
+}
+extension TrueColor {
+    init(from d: Decoder) throws {
+        self.init(); guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }
+        ask = (try? c.decodeIfPresent(Bool.self, forKey: .ask)) ?? ask
+        always = (try? c.decodeIfPresent([String].self, forKey: .always)) ?? always
+        never = (try? c.decodeIfPresent([String].self, forKey: .never)) ?? never
+    }
+}
 struct Ramp: Codable { var start: Date; var seconds: Double; var from: Settings; var to: Settings; var label: String }
 /// Written only by the engine. `disabled` is the master switch; `heldFor` names the app holding true colour.
 struct ModeState: Codable { var mode: String; var daySnapshot: Settings?; var lastSeen: Settings?; var lastNotified: Date?; var ramp: Ramp?; var pausedUntil: Date?
@@ -67,9 +94,11 @@ final class Gamma {
     init() {
         guard !isSnapshotRun else { return }
         CGDisplayRestoreColorSyncSettings()
+        // No restore of its own here: by day it wiped other apps' and calibrators' tables at every wake. While warm,
+        // apply() restores anyway before it reads a fresh baseline, since the emptied cache has none.
         let reapply: (Notification) -> Void = { [weak self] _ in
             guard let self = self else { return }
-            self.cache = [:]; self.noTable = []; CGDisplayRestoreColorSyncSettings(); self.apply(blue: self.blue, green: self.green)
+            self.cache = [:]; self.noTable = []; self.apply(blue: self.blue, green: self.green)
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main, using: reapply)
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main, using: reapply)
@@ -130,6 +159,15 @@ func runStatus(_ exe: String, _ args: [String]) -> (out: String, ok: Bool) {
     return (String(data: data, encoding: .utf8) ?? "", p.terminationStatus == 0)
 }
 @discardableResult func cli(_ args: String...) -> String { runStatus(cliURL.path, args).out }
+/// Runs `body` holding the engine's own lock (flock on .lock), for a read-modify-write of a file the engine writes too.
+/// Bounded the way the engine bounds its wait, so a hung engine run can't wedge the app.
+func withEngineLock(_ body: () -> Void) {
+    let fd = open(appDir.appendingPathComponent(".lock").path, O_CREAT | O_RDWR, 0o644)
+    var waited = 0
+    while fd >= 0 && flock(fd, LOCK_EX | LOCK_NB) != 0 && waited < 500 { usleep(20_000); waited += 1 }
+    body()
+    if fd >= 0 { close(fd) }                // closing releases the lock
+}
 
 // MARK: - Screen shade overlay
 final class ShadeOverlay {
@@ -264,7 +302,7 @@ final class TrueColorWatcher {
     private var declinedHere: String?          // "Bring Red Light Back" pressed while this app stays in front
     private var lastFront: String?             // the last app in front other than this one (opening the pane activates us)
     private var releaseWork: DispatchWorkItem?
-    private var lastMode: String?
+    private var askedNight: Date?              // the evening askedTonight belongs to
     private let prompt = TrueColorPrompt()
     init(model: Model) {
         m = model
@@ -295,9 +333,13 @@ final class TrueColorWatcher {
     }
     /// Called on every refresh: a new night clears the once-a-night memory, and if red light has just begun
     /// while a colour-critical app is already in front, that app gets the same treatment as if it had just opened.
+    /// A night is the evening's date (1 AM still belongs to the night before), not a change of mode: a pause or
+    /// off-and-on mid-evening goes through "day" and asked again, and a lid shut from 1 AM until the next evening
+    /// never sees "day" at all, so it never asked again.
     func reconsider() {
         guard !m.snapshotMode else { return }
-        if let mode = m.state?.mode, mode != lastMode { if mode == "night" { askedTonight = [] }; lastMode = mode }
+        let night = Calendar.current.startOfDay(for: Date().addingTimeInterval(-12 * 3600))
+        if night != askedNight { askedTonight = []; askedNight = night }
         if let app = NSWorkspace.shared.frontmostApplication { consider(app) }
     }
     /// The pane's button is pressed with the pane in front, so the app being declined is the one that was in front
@@ -614,6 +656,8 @@ final class Model: ObservableObject {
     /// Slider steps queued for the engine and not yet applied. While any are, what the engine reports is a step
     /// behind the finger, and reading it back would snap the thumb, the header and the screen back to that step.
     private var setsInFlight = 0
+    private var shadesInFlight = 0          // shade on/off and level queued for shade.json and not yet written
+    private var hotkeysLive: Bool?          // whether the shortcuts were last registered for on (true) or off (false)
 
     init() {
         // A documentation snapshot is a second process beside the running app: it only reads. Gamma and the shade
@@ -706,17 +750,20 @@ final class Model: ObservableObject {
     }
     func refresh() {
         if snapshotDemo { demoLook(); return }
-        if let d = try? Data(contentsOf: configURL), let c = try? dec.decode(Config.self, from: d) {
+        var keysChanged = false
+        if configsInFlight == 0, let d = try? Data(contentsOf: configURL), let c = try? dec.decode(Config.self, from: d) {
             let hk = c.shortcuts ?? Shortcuts(), old = config.shortcuts ?? Shortcuts()
             config = c; diskConfig = c
-            if hk.toggleShade != old.toggleShade || hk.shadeDown != old.shadeDown || hk.shadeUp != old.shadeUp { registerHotkeys() }
+            keysChanged = hk.toggleShade != old.toggleShade || hk.shadeDown != old.shadeDown || hk.shadeUp != old.shadeUp
         }
         state = (try? Data(contentsOf: stateURL)).flatMap { try? dec.decode(ModeState.self, from: $0) }
         learned = (try? Data(contentsOf: learnedURL)).flatMap { try? dec.decode(Learned.self, from: $0) } ?? Learned()
         var sh = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? Shade()
         if setsInFlight > 0 { sh.warmth = shade.warmth; sh.gammaBlue = shade.gammaBlue; sh.gammaGreen = shade.gammaGreen }
+        if shadesInFlight > 0 { sh.enabled = shade.enabled; sh.level = shade.level }     // likewise for setShade()
         shade = sh
         if switchesInFlight == 0 { enabled = !(state?.disabled ?? false) }
+        if keysChanged || hotkeysLive != !isOff { registerHotkeys() }
         drawLook()
         trueColor.reconsider()
         if #available(macOS 13, *) { launchAtLogin = SMAppService.mainApp.status == .enabled }
@@ -757,13 +804,24 @@ final class Model: ObservableObject {
     /// top-level keys changed here since that read, onto what is on disk now — never a stale whole copy over the
     /// engine's write, and never this model's placeholder defaults over a file it could not read.
     private var diskConfig: Config?
+    private var configsInFlight = 0
     func saveConfig(reapply: Bool = true) {
         func obj(_ d: Data?) -> [String: Any]? { d.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } }
-        if let base = diskConfig, let was = obj(try? enc.encode(base)), let mine = obj(try? enc.encode(config)),
-           var disk = obj(try? Data(contentsOf: configURL)) {
-            for k in Set(was.keys).union(mine.keys) where !NSArray(array: [was[k] ?? NSNull()]).isEqual(to: [mine[k] ?? NSNull()]) { disk[k] = mine[k] }
-            if let d = try? JSONSerialization.data(withJSONObject: disk), let merged = try? dec.decode(Config.self, from: d),
-               (try? enc.encode(merged).write(to: configURL, options: .atomic)) != nil { config = merged; diskConfig = merged }
+        if let base = diskConfig, let was = obj(try? enc.encode(base)), let mine = obj(try? enc.encode(config)) {
+            // Under the engine's lock, off the main thread: an engine run that loaded config.json before this
+            // (`location`, `preset save`) would save its whole copy over the change, or this over its. Until it is
+            // written, refresh() keeps this model's config rather than reading the old file back.
+            configsInFlight += 1
+            liveQueue.async { [weak self] in
+                withEngineLock {
+                    guard var disk = obj(try? Data(contentsOf: configURL)) else { NSLog("Red Light: config.json unreadable; not saving over it"); return }
+                    for k in Set(was.keys).union(mine.keys) where !NSArray(array: [was[k] ?? NSNull()]).isEqual(to: [mine[k] ?? NSNull()]) { disk[k] = mine[k] }
+                    if let d = try? JSONSerialization.data(withJSONObject: disk), let merged = try? dec.decode(Config.self, from: d) {
+                        try? enc.encode(merged).write(to: configURL, options: .atomic)
+                    }
+                }
+                DispatchQueue.main.async { guard let self = self else { return }; self.configsInFlight -= 1; self.scheduleRefresh(after: 0.05) }
+            }
         } else { NSLog("Red Light: config.json unreadable; not saving over it") }
         if reapply && isNight { runCLI(["reapply"]) } else { scheduleRefresh(after: 0.05) }
     }
@@ -780,13 +838,24 @@ final class Model: ObservableObject {
     func setShade(enabled: Bool? = nil, level: Double? = nil) {
         guard !isOff else { return }
         bringBackIfHeld()
-        // From disk, not the last refresh: the engine may have written warmth and gamma since (a fade step).
-        var s = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? shade
-        if setsInFlight > 0 { s.warmth = shade.warmth; s.gammaBlue = shade.gammaBlue; s.gammaGreen = shade.gammaGreen }   // as in refresh()
-        if let e = enabled { s.enabled = e }
-        if let l = level { s.level = max(0, min(0.9, l)); if l > 0 && enabled == nil { s.enabled = true } }
+        func change(_ s: inout Shade) {
+            if let e = enabled { s.enabled = e }
+            if let l = level { s.level = max(0, min(0.9, l)); if l > 0 && enabled == nil { s.enabled = true } }
+        }
+        var s = shade; change(&s)
         shade = s; drawLook()
-        try? enc.encode(s).write(to: shadeURL, options: .atomic)
+        // The engine read-modify-writes shade.json under its lock (every fade step, `set`, a preset). Written beside
+        // it, this could put back the warmth it had just written, or be lost under its save. So: under the same lock,
+        // onto what is on disk then, only these two fields — queued behind any slider steps, like them.
+        shadesInFlight += 1
+        liveQueue.async { [weak self] in
+            withEngineLock {
+                var d = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? s
+                change(&d)
+                try? enc.encode(d).write(to: shadeURL, options: .atomic)
+            }
+            DispatchQueue.main.async { guard let self = self else { return }; self.shadesInFlight -= 1; self.scheduleRefresh(after: 0.05) }
+        }
     }
     /// Touching the look during true colour means you want to see it: that is "Bring Red Light Back", first. Otherwise
     /// the change would be saved but invisible — and the engine's `set` would turn the tint leg on under a hold
@@ -805,6 +874,7 @@ final class Model: ObservableObject {
     func setEnabled(_ on: Bool) {
         enabled = on                        // the switch moves under the finger, not a second later
         switchesInFlight += 1
+        if hotkeysLive != !isOff { registerHotkeys() }
         drawLook()                          // off: the normal display now; on: still normal until the engine is on
         liveQueue.async { [weak self] in
             guard let self = self else { return }
@@ -835,8 +905,12 @@ final class Model: ObservableObject {
         refresh()
     }
     func registerHotkeys() {
+        guard !snapshotMode else { return }     // refresh() calls this when the file's shortcuts differ from the defaults
         let hk = config.shortcuts ?? Shortcuts()
-        HotKeys.shared.register([
+        // Off, the shade keys can do nothing, so they are given back rather than swallowed (⌃⌥⌘↑ belongs to
+        // whatever app would otherwise get it). refresh() and setEnabled() re-register when that changes.
+        hotkeysLive = !isOff
+        HotKeys.shared.register(isOff ? [] : [
             // "Lighter" all the way down leaves the level at 0; switching on at nothing would look like a dead key.
             (hk.toggleShade, { [weak self] in guard let s = self else { return }
                 let on = !s.shade.enabled
@@ -1130,7 +1204,9 @@ struct Panel: View {
     // Daylight: a Control Center state row at the top of the pane says what the scheduler is doing
     // ("Waiting for sunset" + when, the way the Focus pane says "Do Not Disturb · off"), and the pane's
     // controls stay live underneath — nothing is dimmed, nothing is hidden behind glass.
-    var waiting: Bool { m.snapshotDaylight ? true : (m.enabled && !m.isNight && m.heldFor == nil) }
+    // A pause is not daylight: the engine pauses by switching to day, and "Waiting for sunset" at 11 PM hid the
+    // only way back, the Paused section's Resume row.
+    var waiting: Bool { m.snapshotDaylight ? true : (m.enabled && !m.isNight && !m.isPaused && m.heldFor == nil) }
 
     var mainPage: some View {
         VStack(spacing: 0) {
@@ -1220,10 +1296,13 @@ struct Panel: View {
         if m.isNight { return m.sunriseText.isEmpty ? "Night" : "Night · Sunrise at \(m.sunriseText)" }
         return m.sunsetText.isEmpty ? "Day" : "Day · Sunset at \(m.sunsetText)"
     }
+    /// What applying it would change nothing of. A preset without a keyboard or shade value leaves those alone when
+    /// applied (only warmth defaults, to 0), so a missing one matches whatever is there rather than counting as off.
     func isCurrent(_ p: Preset) -> Bool {
         let s = p.settings
-        let kbOK = abs((s.keyboardBrightness ?? 0) - (m.live.keyboardBrightness ?? 0)) < 0.0015
-        let shadeOK = (s.shadeEnabled ?? false) == m.shade.enabled && (!m.shade.enabled || abs((s.shadeLevel ?? 0) - m.shade.level) < 0.02)
+        let kbOK = s.keyboardBrightness.map { abs($0 - (m.live.keyboardBrightness ?? 0)) < 0.0015 } ?? true
+        let shadeOK = (s.shadeEnabled ?? m.shade.enabled) == m.shade.enabled
+            && (!m.shade.enabled || s.shadeLevel.map { abs($0 - m.shade.level) < 0.02 } ?? true)
         let warmOK = abs((s.warmth ?? 0) - (m.live.warmth ?? 0)) < 0.03
         return kbOK && shadeOK && warmOK
     }
@@ -1366,10 +1445,21 @@ struct SettingsPage: View {
 }
 
 // MARK: - App
+/// One copy runs. A Mac can hold two (an old ~/Applications copy beside the one dragged from the disk image), and
+/// whichever started first used to make the other quit — so the old build could win at every login. Now the newer
+/// build survives and quits the older; between equal builds the one already running stays.
+func isNewerBuild(_ a: [String: Any]?, than b: [String: Any]?) -> Bool {
+    func v(_ i: [String: Any]?, _ k: String) -> String { i?[k] as? String ?? "0" }
+    let (sa, sb) = (v(a, "CFBundleShortVersionString"), v(b, "CFBundleShortVersionString"))
+    if Updater.newer(sa, than: sb) || Updater.newer(sb, than: sa) { return Updater.newer(sa, than: sb) }
+    return Updater.newer(v(a, "CFBundleVersion"), than: v(b, "CFBundleVersion"))
+}
 func enforceSingleInstance() {
     let me = NSRunningApplication.current
     let others = NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == me.bundleIdentifier && $0.processIdentifier != me.processIdentifier }
-    if !others.isEmpty { NSApp.terminate(nil); exit(0) }
+    let older = others.filter { o in isNewerBuild(Bundle.main.infoDictionary, than: o.bundleURL.flatMap { Bundle(url: $0)?.infoDictionary }) }
+    if older.count < others.count { NSApp.terminate(nil); exit(0) }      // an equal or newer copy is already running
+    older.forEach { $0.terminate() }
 }
 /// `Red Light --snapshot out.png [settings]` renders the panel to a PNG for documentation, off-screen, in dark
 /// appearance, on a dark backdrop. No screen-recording grant is needed; system glass is not part of the view.
