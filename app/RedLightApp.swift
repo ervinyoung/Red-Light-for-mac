@@ -751,7 +751,7 @@ final class Model: ObservableObject {
     func refresh() {
         if snapshotDemo { demoLook(); return }
         var keysChanged = false
-        if let d = try? Data(contentsOf: configURL), let c = try? dec.decode(Config.self, from: d) {
+        if configsInFlight == 0, let d = try? Data(contentsOf: configURL), let c = try? dec.decode(Config.self, from: d) {
             let hk = c.shortcuts ?? Shortcuts(), old = config.shortcuts ?? Shortcuts()
             config = c; diskConfig = c
             keysChanged = hk.toggleShade != old.toggleShade || hk.shadeDown != old.shadeDown || hk.shadeUp != old.shadeUp
@@ -804,13 +804,24 @@ final class Model: ObservableObject {
     /// top-level keys changed here since that read, onto what is on disk now — never a stale whole copy over the
     /// engine's write, and never this model's placeholder defaults over a file it could not read.
     private var diskConfig: Config?
+    private var configsInFlight = 0
     func saveConfig(reapply: Bool = true) {
         func obj(_ d: Data?) -> [String: Any]? { d.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } }
-        if let base = diskConfig, let was = obj(try? enc.encode(base)), let mine = obj(try? enc.encode(config)),
-           var disk = obj(try? Data(contentsOf: configURL)) {
-            for k in Set(was.keys).union(mine.keys) where !NSArray(array: [was[k] ?? NSNull()]).isEqual(to: [mine[k] ?? NSNull()]) { disk[k] = mine[k] }
-            if let d = try? JSONSerialization.data(withJSONObject: disk), let merged = try? dec.decode(Config.self, from: d),
-               (try? enc.encode(merged).write(to: configURL, options: .atomic)) != nil { config = merged; diskConfig = merged }
+        if let base = diskConfig, let was = obj(try? enc.encode(base)), let mine = obj(try? enc.encode(config)) {
+            // Under the engine's lock, off the main thread: an engine run that loaded config.json before this
+            // (`location`, `preset save`) would save its whole copy over the change, or this over its. Until it is
+            // written, refresh() keeps this model's config rather than reading the old file back.
+            configsInFlight += 1
+            liveQueue.async { [weak self] in
+                withEngineLock {
+                    guard var disk = obj(try? Data(contentsOf: configURL)) else { NSLog("Red Light: config.json unreadable; not saving over it"); return }
+                    for k in Set(was.keys).union(mine.keys) where !NSArray(array: [was[k] ?? NSNull()]).isEqual(to: [mine[k] ?? NSNull()]) { disk[k] = mine[k] }
+                    if let d = try? JSONSerialization.data(withJSONObject: disk), let merged = try? dec.decode(Config.self, from: d) {
+                        try? enc.encode(merged).write(to: configURL, options: .atomic)
+                    }
+                }
+                DispatchQueue.main.async { guard let self = self else { return }; self.configsInFlight -= 1; self.scheduleRefresh(after: 0.05) }
+            }
         } else { NSLog("Red Light: config.json unreadable; not saving over it") }
         if reapply && isNight { runCLI(["reapply"]) } else { scheduleRefresh(after: 0.05) }
     }
