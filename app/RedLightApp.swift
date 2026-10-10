@@ -59,13 +59,16 @@ let isSnapshotRun = CommandLine.arguments.contains("--snapshot")
 // MARK: - Gamma legs of warmth (channel scaling at the display's transfer table)
 final class Gamma {
     private var cache: [CGDirectDisplayID: ([CGGammaValue], [CGGammaValue], [CGGammaValue], UInt32)] = [:]
+    /// Displays with no transfer table to scale (Sidecar, AirPlay, some adapters). Without this they never get a cache
+    /// entry, so every apply restored ColorSync on all displays and verify() redrew every 2 s: a flicker while warm.
+    private var noTable: Set<CGDirectDisplayID> = []
     private(set) var blue: Double = 1, green: Double = 1
     init() {
         guard !isSnapshotRun else { return }
         CGDisplayRestoreColorSyncSettings()
         let reapply: (Notification) -> Void = { [weak self] _ in
             guard let self = self else { return }
-            self.cache = [:]; CGDisplayRestoreColorSyncSettings(); self.apply(blue: self.blue, green: self.green)
+            self.cache = [:]; self.noTable = []; CGDisplayRestoreColorSyncSettings(); self.apply(blue: self.blue, green: self.green)
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main, using: reapply)
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main, using: reapply)
@@ -84,12 +87,13 @@ final class Gamma {
         CGGetOnlineDisplayList(16, &ids, &n)
         // The baseline must be the display's own ColorSync table, never whatever is on it now: reading a table
         // that already carries a scaling (ours from before, or a process that just quit) applied red twice.
-        if ids.prefix(Int(n)).contains(where: { cache[$0] == nil }) { CGDisplayRestoreColorSyncSettings() }
-        for d in ids.prefix(Int(n)) {
+        let displays = ids.prefix(Int(n)).filter { !noTable.contains($0) }
+        if displays.contains(where: { cache[$0] == nil }) { CGDisplayRestoreColorSyncSettings() }
+        for d in displays {
             if cache[d] == nil {
                 let cap = CGDisplayGammaTableCapacity(d)
                 var r = [CGGammaValue](repeating: 0, count: Int(cap)), gg = r, bb = r; var got: UInt32 = 0
-                guard CGGetDisplayTransferByTable(d, cap, &r, &gg, &bb, &got) == .success else { continue }
+                guard CGGetDisplayTransferByTable(d, cap, &r, &gg, &bb, &got) == .success, got > 0 else { noTable.insert(d); continue }
                 cache[d] = (r, gg, bb, got)
             }
             let (r, gg, bb, got) = cache[d]!
@@ -102,7 +106,7 @@ final class Gamma {
         guard !isSnapshotRun, blue < 0.999 || green < 0.999 else { return }
         var ids = [CGDirectDisplayID](repeating: 0, count: 16); var n: UInt32 = 0
         CGGetOnlineDisplayList(16, &ids, &n)
-        for d in ids.prefix(Int(n)) {
+        for d in ids.prefix(Int(n)) where !noTable.contains(d) {
             guard let (_, gg, bb, got) = cache[d], got > 0 else { apply(blue: blue, green: green); return }
             let cap = CGDisplayGammaTableCapacity(d)
             var r = [CGGammaValue](repeating: 0, count: Int(cap)), g2 = r, b2 = r; var now: UInt32 = 0
