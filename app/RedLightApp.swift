@@ -494,6 +494,42 @@ enum Setup {
         }
     }
     /// Until Location Services answers, the sun is guessed from the time zone's own coordinates (zone.tab).
+    /// Opened straight from the disk image, or from the read-only copy macOS makes of a quarantined download (App
+    /// Translocation), the app can't update itself and a login item would point at a path about to vanish. Offer to
+    /// copy it to Applications and start it from there. Nothing is ejected or deleted.
+    static func offerMoveToApplications() {
+        guard Updater.cannotReplaceHere != nil, !Bundle.main.bundlePath.hasPrefix("/Applications/"),
+              !UserDefaults.standard.bool(forKey: "dontOfferMove") else { return }
+        let fm = FileManager.default, here = Bundle.main.bundleURL, dest = URL(fileURLWithPath: "/Applications/Red Light.app")
+        let there = fm.fileExists(atPath: dest.path) ? Bundle(url: dest)?.infoDictionary : nil
+        let a = NSAlert()
+        a.messageText = "Move Red Light to Applications?"
+        a.informativeText = "Red Light is running from the disk image or a temporary copy, where it can’t keep itself up to date or open at login."
+        a.addButton(withTitle: "Move to Applications"); a.addButton(withTitle: "Not Now")
+        a.showsSuppressionButton = true
+        NSApp.activate()
+        let answer = a.runModal()
+        if a.suppressionButton?.state == .on { UserDefaults.standard.set(true, forKey: "dontOfferMove") }
+        guard answer == .alertFirstButtonReturn else { return }
+        // Already there and at least as new (an old disk image opened again): start that one rather than downgrade it.
+        if there?["CFBundleIdentifier"] as? String == Bundle.main.bundleIdentifier,
+           let v = there?["CFBundleShortVersionString"] as? String, !Updater.newer(Updater.current, than: v) { Updater.relaunch(dest); return }
+        let tmp = dest.deletingLastPathComponent().appendingPathComponent(".Red Light.app.moving")
+        try? fm.removeItem(at: tmp)
+        // Another app that happens to be called Red Light is never replaced.
+        if there == nil || there?["CFBundleIdentifier"] as? String == Bundle.main.bundleIdentifier, runStatus("/usr/bin/ditto", [here.path, tmp.path]).ok {
+            // Copied by ditto, not Finder: left quarantined it would be translocated again. This copy is already approved.
+            _ = runStatus("/usr/bin/xattr", ["-dr", "com.apple.quarantine", tmp.path])
+            do {
+                if there != nil { _ = try fm.replaceItemAt(dest, withItemAt: tmp) } else { try fm.moveItem(at: tmp, to: dest) }
+                Updater.relaunch(dest); return
+            } catch { NSLog("move: \(error)") }
+        }
+        try? fm.removeItem(at: tmp)
+        let f = NSAlert(); f.messageText = "Couldn’t move Red Light"
+        f.informativeText = "Drag Red Light from the disk image to the Applications folder, then open it from there."
+        f.runModal()
+    }
     /// An old name (Asia/Calcutta, Europe/Kiev) isn't in zone.tab, but its zoneinfo file is a copy of its new name's.
     /// A bare offset (UTC, Etc/GMT+5) has no place at all: then at least the longitude follows the offset, so sunset
     /// lands in the evening rather than at San Francisco's sunset hour.
@@ -733,6 +769,7 @@ final class Model: ObservableObject {
         // prompt, and no true-colour watching that could send `hold`.
         guard !snapshotMode else { refresh(); return }
         Setup.ensure()
+        DispatchQueue.main.async { Setup.offerMoveToApplications() }     // after launch, not inside the scene's setup
         ensureAgent()
         refresh()
         watchFolder()
