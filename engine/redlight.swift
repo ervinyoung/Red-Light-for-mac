@@ -18,6 +18,10 @@ let appProcessName = "RedLight"
 func log(_ s: String) {
     let line = "\(ISO8601DateFormatter().string(from: Date())) \(s)\n"
     print(s)
+    // Every slider step is a line, so the log is capped: past 1 MB it becomes redlight.log.1 (replacing the last one).
+    if let size = (try? FileManager.default.attributesOfItem(atPath: logURL.path))?[.size] as? Int, size > 1_000_000 {
+        _ = rename(logURL.path, logURL.path + ".1")
+    }
     if let h = try? FileHandle(forWritingTo: logURL) { h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); h.closeFile() }
     else { try? line.write(to: logURL, atomically: true, encoding: .utf8) }
 }
