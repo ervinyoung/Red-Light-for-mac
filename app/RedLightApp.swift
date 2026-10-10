@@ -600,6 +600,7 @@ final class Model: ObservableObject {
     @Published var locationDenied = false
     var snapshotMode = isSnapshotRun
     var snapshotDaylight = false      // --snapshot … daylight, to capture the daytime state
+    var snapshotDemo = false          // --snapshot … demo: a fixed night look for marketing images, not this Mac's state
     let overlay = ShadeOverlay()
     let gamma = Gamma()
     let locator = Locator()
@@ -652,6 +653,16 @@ final class Model: ObservableObject {
             guard let self = self else { return }
             self.updater.tick(screenIsPlain: self.isOff || !self.isTinting) }
     }
+    /// Night, Red Shift 80 %, keys at 0.3 % with a 5 s timeout — the "Night" preset, as shipped.
+    func demoLook() {
+        if let d = try? Data(contentsOf: configURL), let c = try? dec.decode(Config.self, from: d) { config = c }
+        state = ModeState(mode: "night", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil, disabled: false, heldFor: nil)
+        let c = warmthCurve(0.8)
+        shade = Shade(enabled: false, level: 0.2, warmth: 0.8, gammaBlue: c.blue, gammaGreen: c.green)
+        live = Settings(keyboardBrightness: 0.003, keyboardIdleDimSeconds: 5, shadeEnabled: false, shadeLevel: 0.2, warmth: 0.8)
+        enabled = true
+        sunLine = "sunrise 7:11 AM (switch 7:11 AM)   sunset 6:39 PM (switch 6:39 PM)   now 11:58 PM -> night"
+    }
     var plistPath: String { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(agentLabel).plist").path }
     /// The agent is always loaded now. Builds before this one expressed "off" by unloading it, so an unloaded
     /// agent with no recorded switch is carried over as off before it is loaded again.
@@ -694,6 +705,7 @@ final class Model: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: w)
     }
     func refresh() {
+        if snapshotDemo { demoLook(); return }
         if let d = try? Data(contentsOf: configURL), let c = try? dec.decode(Config.self, from: d) {
             let hk = c.shortcuts ?? Shortcuts(), old = config.shortcuts ?? Shortcuts()
             config = c; diskConfig = c
@@ -1368,6 +1380,7 @@ func snapshotIfRequested() {
     let page = args.contains("settings") ? "settings" : args.contains("prompt") ? "prompt" : "main"
     let app = NSApplication.shared; app.setActivationPolicy(.prohibited)
     let model = Model(); model.snapshotMode = true; model.snapshotDaylight = args.contains("daylight")
+    model.snapshotDemo = args.contains("demo")
     // Let the live values (read through the engine, off the main thread) land before the view first appears,
     // so every slider and switch is created already showing the real state.
     model.refresh()

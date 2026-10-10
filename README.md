@@ -1,10 +1,25 @@
 <p align="center">
-  <a href="https://ervinyoung.github.io/Red-Light-for-mac/"><img src="docs/img/hero.png" alt="Red Light for Mac — Zero blue. Sleep better. The Red Light panel in the macOS menu bar." width="100%"></a>
+  <img src="docs/img/icon.png" width="128" height="128" alt="Red Light app icon">
 </p>
 
-# Red Light
-A menu bar app that takes every trace of blue out of your Mac at sunset — across a thirty-minute fade you never
-notice — with presets for after dark that it learns to pick for you. Free, open source, on-device.
+<h1 align="center">Red Light</h1>
+
+<p align="center">
+  <b>Zero blue. Sleep better.</b><br>
+  A menu bar app that takes every trace of blue out of your Mac at sunset —<br>
+  across a thirty-minute fade you never notice — with presets for after dark that it learns to pick for you.
+</p>
+
+<p align="center">
+  <a href="https://github.com/ervinyoung/Red-Light-for-mac/releases/latest/download/Red-Light.dmg"><img src="https://img.shields.io/badge/Download_for_Mac-ff1a0f?style=for-the-badge&logo=apple&logoColor=white" alt="Download for Mac" height="36"></a>
+</p>
+<p align="center">
+  <sub>Free and open source · Apple silicon · macOS 26 or later · <a href="https://ervinyoung.github.io/Red-Light-for-mac/">Website</a></sub>
+</p>
+
+<p align="center">
+  <a href="https://ervinyoung.github.io/Red-Light-for-mac/"><img src="docs/img/hero.png" alt="The Red Light panel open from the macOS menu bar" width="100%"></a>
+</p>
 
 - **Native, not bolted on.** A Control Center panel one click from the menu bar, built from the system's own
   controls, type and colour. Sliders apply live as you drag. Nothing new to learn.
@@ -14,8 +29,8 @@ notice — with presets for after dark that it learns to pick for you. Free, ope
   for the last hour. Each one moves the display, the keyboard and the shade together.
 - **It learns.** Settle on the same adjustment three nights out of the last fourteen and it becomes your default —
   the transition time included. It never fights a change in the moment; it just stops needing to be told.
-
-Site: https://ervinyoung.github.io/Red-Light-for-mac
+- **True color when it matters.** Open Figma, Sketch or Photoshop at night and it offers true color while that app
+  is in front, then brings the red back when you switch away.
 
 ## The science
 Controlled human studies, each linked to its paper:
