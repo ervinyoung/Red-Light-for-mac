@@ -475,9 +475,10 @@ final class Model: ObservableObject {
     var plistPath: String { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(agentLabel).plist").path }
     /// The agent is always loaded now. Builds before this one expressed "off" by unloading it, so an unloaded
     /// agent with no recorded switch is carried over as off before it is loaded again.
-    /// Once only, on this build's first launch: "on" is recorded as no `disabled` at all, so later an unloaded agent
-    /// (a login-order race, Background Items switched off in System Settings) is indistinguishable from the old off,
-    /// and reading it that way would switch Red Light off by itself.
+    /// Once only, on this build's first launch. The engine now records "on" as `disabled: false`, so a missing key
+    /// should mean a pre-switch state — but the first engine with the switch wrote "on" as no key, and its state.json
+    /// stays that way until the new engine next runs. Read later, an unloaded agent (a login-order race, Background
+    /// Items switched off in System Settings) beside such a file would switch Red Light off by itself.
     func ensureAgent() {
         let migrate = !UserDefaults.standard.bool(forKey: "switchCarriedOver")
         UserDefaults.standard.set(true, forKey: "switchCarriedOver")
