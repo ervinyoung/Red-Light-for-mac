@@ -28,22 +28,34 @@ How to uphold the rule in code:
 
 ## Repo layout
 
-- `app/RedLightApp.swift` — SwiftUI menu bar pane (~900 lines, everything UI lives here)
-- `engine/redlight.swift` — the CLI + launchd scheduler (~700 lines)
-- `app/build.sh` — builds the app into `/Applications` (ad-hoc signed)
-- `install.sh` — full install: engine, config seed, LaunchAgent, app (re-run to update; keeps settings)
+- `app/RedLightApp.swift` — SwiftUI menu bar pane, plus first-launch setup (`enum Setup`) and the signed
+  updater (`Updater`) (~1,400 lines, everything UI lives here)
+- `engine/redlight.swift` — the CLI + launchd scheduler (~900 lines)
+- `app/build.sh` — builds the app into `/Applications` (or the path given) with the engine inside it at
+  `Contents/Helpers/redlight`; signs with Developer ID, else Apple Development, else ad-hoc
+- `install.sh` — install from source: builds the app, installs its engine, config seed, LaunchAgent (re-run to
+  update; keeps settings)
 - `uninstall.sh` — turns Red Light off, removes agent, app and engine; `--all` also deletes settings
+- `release.sh` — builds `dist/Red-Light.dmg`, `dist/Red-Light.zip` and its Ed25519 signature; `--publish` makes
+  the GitHub release the updater reads. `publish.sh` — one-time repo, Pages and first-release setup
 - Shared files live in `~/Library/Application Support/RedLight`. The engine serialises itself with `flock` on
   `.lock`; the app writes config.json by merging only the keys it changed, never a whole stale copy
-- `tools/` — documentation-image pipeline (`--snapshot` renders the pane off-screen to PNG;
-  flags: `settings`, `daylight`, `light`, `clear`)
+- Every launch of the app (not a `--snapshot` run) copies its bundled engine over the installed `redlight` in that
+  folder if they differ, seeds config.json if missing, and writes the LaunchAgent plist if missing. Whichever build
+  you launch last owns the installed engine: one built there by hand lasts only until the next app launch
+- `tools/` — documentation images (`--snapshot` renders the pane off-screen to PNG; flags: `settings`, `daylight`,
+  `light`, `clear`), the disk image (`make-dmg.sh`, `dmg-background.swift`) and update signing (`sign-update.swift`)
 
 ## Working on the UI
 
 ```sh
-./app/build.sh                                            # rebuild into /Applications
-kill "$(pgrep -x RedLight)"; open "/Applications/Red Light.app"
+./app/build.sh                                            # rebuild into /Applications (engine included)
+kill "$(pgrep -x RedLight)"; open "/Applications/Red Light.app"   # relaunching also installs its engine
 ```
+
+A build carries `CFBundleShortVersionString` from `app/Info.plist`; once a newer release exists on GitHub, the
+running app replaces itself with it (Settings › Updates turns that off while you work). `REDLIGHT_UPDATE_FEED`
+points the updater at another releases URL for testing.
 
 Verify changes with the snapshot pipeline before shipping:
 

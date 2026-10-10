@@ -7,15 +7,29 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 DIR="$HOME/Library/Application Support/RedLight"
 LABEL="com.ervinyoung.redlight"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+APP="/Applications/Red Light.app"
+# A standard (non-admin) account can't write to /Applications; say so now rather than halfway through a build.
+if [ -e "$APP" ]; then W="$APP"; else W="${APP:h}"; fi
+[ -w "$W" ] || { echo "$W isn't writable by this account: run ./install.sh from an administrator account"; exit 1; }
 mkdir -p "$DIR/gui" "$HOME/Library/LaunchAgents"
-echo "→ building engine"
+# Builds before the switch moved into the engine said "off" by unloading the agent. Keep that off, as the app would,
+# rather than quietly turning Red Light back on by loading the agent again. Decided now, before anything is replaced:
+# once the new engine is in place, any `check` (the old app's wake or location check, mid-build) records "on".
+CARRY_OFF=
+if [ -f "$PLIST" ] && [ -f "$DIR/state.json" ] && ! grep -q '"disabled"' "$DIR/state.json" \
+   && ! launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
+  CARRY_OFF=1
+fi
+echo "→ building the app, with the engine inside it"
 cp "$HERE/engine/redlight.swift" "$DIR/redlight.swift"
-# Built beside and moved into place, so a check the agent is running right now never sees a half-written binary.
-swiftc -O "$DIR/redlight.swift" -o "$DIR/redlight.new"
-mv -f "$DIR/redlight.new" "$DIR/redlight"
-echo "→ building app"
 cp -R "$HERE/app/." "$DIR/gui/"
-chmod +x "$DIR/gui/build.sh"; "$DIR/gui/build.sh"
+chmod +x "$DIR/gui/build.sh"; "$DIR/gui/build.sh" "$APP"
+echo "→ installing the engine"
+# The app's own copy, byte for byte: the app replaces an engine that differs from the one inside it every time it
+# starts, so one compiled separately was only replaced again — and if the app build failed, it was left running
+# beside the old app. Copied beside and moved into place, so a check running right now never sees half a binary.
+cp "$APP/Contents/Helpers/redlight" "$DIR/redlight.new"
+mv -f "$DIR/redlight.new" "$DIR/redlight"
 # A copy that is already running keeps the old build until it quits; and with two running, the new one exits.
 if pgrep -x RedLight >/dev/null; then
   pkill -x RedLight || true
@@ -60,12 +74,7 @@ JSON
   mv -f "$DIR/config.json.new" "$DIR/config.json"
 fi
 echo "→ installing the sunrise/sunset agent"
-# Builds before the switch moved into the engine said "off" by unloading the agent. Keep that off, as the app would,
-# rather than quietly turning Red Light back on by loading the agent again.
-if [ -f "$PLIST" ] && [ -f "$DIR/state.json" ] && ! grep -q '"disabled"' "$DIR/state.json" \
-   && ! launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
-  "$DIR/redlight" off || true
-fi
+if [ -n "$CARRY_OFF" ]; then "$DIR/redlight" off || true; fi
 # stdout goes nowhere: everything `check` prints is already in redlight.log, and launchd.out.log only ever grew.
 # AbandonProcessGroup: launchd otherwise kills the osascript a check spawns for its "Adjusted…" notification.
 cat > "$PLIST" <<PL
@@ -85,8 +94,9 @@ rm -f "$DIR/launchd.out.log"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 # bootout returns before the old job is gone, and bootstrap fails ("Input/output error") until it is.
 for i in {1..20}; do launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null && break; sleep 0.25; done
-launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || { echo "could not load the agent: launchctl bootstrap gui/$(id -u) \"$PLIST\""; exit 1; }
-open "/Applications/Red Light.app"
+launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || { echo "could not load the agent: launchctl bootstrap gui/$(id -u) \"$PLIST\""
+     echo "(if Red Light is switched off in System Settings › General › Login Items › Allow in the Background, switch it on and run ./install.sh again)"; exit 1; }
+open "$APP"
 echo
 echo "Red Light is installed. Look for the sunset icon in the menu bar."
 echo "Terminal shortcut:  echo 'alias redlight=\"\$HOME/Library/Application\\ Support/RedLight/redlight\"' >> ~/.zshrc"

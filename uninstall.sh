@@ -12,11 +12,22 @@ if [ -x "$DIR/redlight" ]; then "$DIR/redlight" off >/dev/null || true; fi
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 rm -f "$PLIST"
 pkill -x RedLight 2>/dev/null || true          # quitting hands the gamma table and the shade back to macOS
+for i in {1..20}; do pgrep -x RedLight >/dev/null || break; sleep 0.25; done
 for app in "/Applications/Red Light.app" "$HOME/Applications/Red Light.app"; do
-  if [ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Contents/Info.plist" 2>/dev/null)" = "$LABEL" ]; then rm -rf "$app"; fi
+  if [ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Contents/Info.plist" 2>/dev/null)" = "$LABEL" ]; then
+    # Carry on if it can't go (a standard account and /Applications): the rest still has to be removed.
+    rm -rf "$app" 2>/dev/null || echo "Couldn't remove $app (this account can't write there): drag it to the Trash."
+  fi
+done
+# The app sets Red Light up again (engine, agent, config) whenever it is opened, so any other copy brings it back.
+mdfind "kMDItemCFBundleIdentifier == '$LABEL'" 2>/dev/null | while IFS= read -r app; do
+  if [ -d "$app" ] && [ "$app" != "/Applications/Red Light.app" ]; then
+    echo "Another copy is at $app: opening it installs Red Light again, so drag it to the Trash too."
+  fi
 done
 if [ "$1" = "--all" ]; then
   rm -rf "$DIR"
+  defaults delete "$LABEL" 2>/dev/null || true    # the app's own preferences: automatic updates, update checks
   echo "Red Light is removed, with its settings and everything it learned."
 else
   rm -rf "$DIR/gui"
