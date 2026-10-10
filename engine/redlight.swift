@@ -119,6 +119,8 @@ struct Learned: Codable {
     var nightShadeLevel: Double?
     var nightWarmth: Double?
     var history: [String] = []
+    /// Night levels are learned only from changes after this (set when a new sunset preset is chosen).
+    var levelsSince: Date?
 }
 struct Event: Codable {
     var t: Date; var mode: String; var nightID: String
@@ -417,7 +419,10 @@ func learn(cfg: Config, learned: Learned, state: inout State, now: Date) -> Lear
     var notes: [String] = []
     func settledNightValue(_ field: String, tol: Double) -> Double? {
         var lastPerNight: [String: Double] = [:]
-        for e in events where e.field == field && e.mode == "night" { lastPerNight[e.nightID] = e.to }
+        // Turning red off (before bed, at dawn) says when night should end, not how red it should be: counting it
+        // here learned a night warmth of 0. And evidence from before a newly chosen sunset preset is stale.
+        for e in events where e.field == field && e.mode == "night" && e.t >= (learned.levelsSince ?? .distantPast)
+                               && !(field == "warmth" && e.to <= 0.02) { lastPerNight[e.nightID] = e.to }
         let vals = Array(lastPerNight.values)
         guard vals.count >= L.minNights else { return nil }
         let m = median(vals)
@@ -451,8 +456,12 @@ func learn(cfg: Config, learned: Learned, state: inout State, now: Date) -> Lear
     func turnedOn(_ e: Event) -> Bool { e.from <= 0.02 && e.to > 0.02 }
     func turnedOff(_ e: Event) -> Bool { e.from > 0.02 && e.to <= 0.02 }
     let sunsetOff = offsets { e in
-        if e.mode == "day", turnedOn(e), e.minsFromSunset > -180, e.minsFromSunset < 0 { return e.minsFromSunset }
-        if e.mode == "night", turnedOff(e), e.minsFromSunset >= 0, e.minsFromSunset < 90 { return e.minsFromSunset }
+        // Windows reach to where the switch happens now, so a learned offset can be walked back as well as further
+        // (with only the raw-sunset windows, an offset of -40 could never move later again) — and no further, so
+        // switching off a "Turn On Now" in the afternoon isn't taken for a sunset time.
+        let o = learned.sunsetOffsetMinutes
+        if e.mode == "day", turnedOn(e), e.minsFromSunset > min(0, o) - 180, e.minsFromSunset < max(0, o) { return e.minsFromSunset }
+        if e.mode == "night", turnedOff(e), e.minsFromSunset >= min(0, o), e.minsFromSunset < max(0, o) + 90 { return e.minsFromSunset }
         return nil
     }
     if let o = sunsetOff {
@@ -460,8 +469,9 @@ func learn(cfg: Config, learned: Learned, state: inout State, now: Date) -> Lear
         if abs(v - learned.sunsetOffsetMinutes) >= 10 { new.sunsetOffsetMinutes = v; notes.append("night now begins \(Int(abs(v))) min \(v < 0 ? "before" : "after") sunset") }
     }
     let sunriseOff = offsets { e in
-        if e.mode == "night", turnedOff(e), e.minsFromSunrise > -180, e.minsFromSunrise < 0 { return e.minsFromSunrise }
-        if e.mode == "day", turnedOn(e), e.minsFromSunrise >= 0, e.minsFromSunrise < 90 { return e.minsFromSunrise }
+        let o = learned.sunriseOffsetMinutes
+        if e.mode == "night", turnedOff(e), e.minsFromSunrise > min(0, o) - 180, e.minsFromSunrise < max(0, o) { return e.minsFromSunrise }
+        if e.mode == "day", turnedOn(e), e.minsFromSunrise >= min(0, o), e.minsFromSunrise < max(0, o) + 90 { return e.minsFromSunrise }
         return nil
     }
     if let o = sunriseOff {
@@ -788,7 +798,7 @@ case "preset":
         c.night.filterEnabled = nil; c.night.intensity = nil; c.night.filterType = nil; c.night.hue = nil
         c.nightPresetName = p.name
         saveConfig(c)
-        var l = learned; l.nightKeyboardBrightness = nil; l.nightIdleDimSeconds = nil; l.nightShadeLevel = nil; l.nightWarmth = nil; saveLearned(l)
+        var l = learned; l.nightKeyboardBrightness = nil; l.nightIdleDimSeconds = nil; l.nightShadeLevel = nil; l.nightWarmth = nil; l.levelsSince = now; saveLearned(l)
         log("sunset preset is now '\(p.name)'")
         if var st = loadState(), st.mode == "night", st.pausedUntil == nil, st.disabled != true { st.ramp = nil; holdTint = st.heldFor != nil; apply(nightPreset(cfg: c, learned: l), label: "NIGHT (preset changed)"); st.lastSeen = readCurrent(); saveState(st) }
     case "delete":
