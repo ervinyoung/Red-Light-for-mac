@@ -543,7 +543,13 @@ func startTransition(to mode: String, cfg: Config, learned: Learned, state: Stat
     } else {
         target = dayLook(cfg: cfg, state: st)
     }
-    let from = readCurrent()
+    var from = readCurrent()
+    // Under auto-brightness readCurrent has no level, and a fade from nothing snapped the keyboard to night at once.
+    // The hardware does report what auto chose (unless idle-dimmed, when it says 0), so ease from that.
+    if from.keyboardBrightness == nil, let id = kbIDs().first,
+       !kbGetBool("isBacklightDimmedOnKeyboard:", id), !kbGetBool("isBacklightSuppressedOnKeyboard:", id) {
+        from.keyboardBrightness = Double(kbGetFloat("brightnessForKeyboard:", id))
+    }
     st.mode = mode
     st.ramp = nil
     // If we woke up mid-transition, pick the fade up where the clock says it should be.
