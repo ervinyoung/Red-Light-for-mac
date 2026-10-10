@@ -2,7 +2,7 @@
 // and quietly learns from manual adjustments.
 // Usage: redlight check | night | day | pause <min>|sunrise | resume | set <field> <value> | preset … |
 //        shade … | location <lat> <lon> [auto|manual] | reapply | status | suntimes | learned | forget |
-//        on | off | hold <app> | release
+//        on | off | hold <app> | release | curve
 import Foundation
 
 let appDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/RedLight")
@@ -863,7 +863,7 @@ case "shade":
     case "down": sh.level = max(0, (sh.level - 0.1).rounded(toPlaces: 2)); if sh.level == 0 { sh.enabled = false }
     default:
         if let pct = Double(arg) { sh.level = max(0, min(0.9, pct / 100)); sh.enabled = sh.level > 0 }
-        else { print("usage: redlight shade on|off|toggle|up|down|<0-100>"); exit(2) }
+        else { print("usage: redlight shade on|off|toggle|up|down|<0-90>"); exit(2) }
     }
     saveShade(sh)
     print("shade \(sh.enabled ? "on" : "off") \(Int((sh.level * 100).rounded()))%")
@@ -906,5 +906,5 @@ case "forget":
 case "curve":
     for w in stride(from: 0.0, through: 1.0, by: 0.1) { let c = warmthCurve(w); print(String(format: "warmth %3.0f%%  blue %.2f  green %.2f  tint %.2f", w * 100, c.blue, c.green, c.tint)) }
 default:
-    print("usage: redlight on|off|check|night|day|pause|resume|hold|release|location|set|preset|shade|reapply|status|suntimes|learned|forget"); exit(2)
+    print("usage: redlight on|off|check|night|day|pause|resume|hold|release|location|set|preset|shade|reapply|status|suntimes|learned|forget|curve"); exit(2)
 }
