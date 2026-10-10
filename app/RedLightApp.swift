@@ -1445,10 +1445,21 @@ struct SettingsPage: View {
 }
 
 // MARK: - App
+/// One copy runs. A Mac can hold two (an old ~/Applications copy beside the one dragged from the disk image), and
+/// whichever started first used to make the other quit — so the old build could win at every login. Now the newer
+/// build survives and quits the older; between equal builds the one already running stays.
+func isNewerBuild(_ a: [String: Any]?, than b: [String: Any]?) -> Bool {
+    func v(_ i: [String: Any]?, _ k: String) -> String { i?[k] as? String ?? "0" }
+    let (sa, sb) = (v(a, "CFBundleShortVersionString"), v(b, "CFBundleShortVersionString"))
+    if Updater.newer(sa, than: sb) || Updater.newer(sb, than: sa) { return Updater.newer(sa, than: sb) }
+    return Updater.newer(v(a, "CFBundleVersion"), than: v(b, "CFBundleVersion"))
+}
 func enforceSingleInstance() {
     let me = NSRunningApplication.current
     let others = NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == me.bundleIdentifier && $0.processIdentifier != me.processIdentifier }
-    if !others.isEmpty { NSApp.terminate(nil); exit(0) }
+    let older = others.filter { o in isNewerBuild(Bundle.main.infoDictionary, than: o.bundleURL.flatMap { Bundle(url: $0)?.infoDictionary }) }
+    if older.count < others.count { NSApp.terminate(nil); exit(0) }      // an equal or newer copy is already running
+    older.forEach { $0.terminate() }
 }
 /// `Red Light --snapshot out.png [settings]` renders the panel to a PNG for documentation, off-screen, in dark
 /// appearance, on a dark backdrop. No screen-recording grant is needed; system glass is not part of the view.
