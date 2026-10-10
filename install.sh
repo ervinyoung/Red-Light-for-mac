@@ -8,6 +8,9 @@ DIR="$HOME/Library/Application Support/RedLight"
 LABEL="com.ervinyoung.redlight"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 APP="/Applications/Red Light.app"
+# A standard (non-admin) account can't write to /Applications; say so now rather than halfway through a build.
+if [ -e "$APP" ]; then W="$APP"; else W="${APP:h}"; fi
+[ -w "$W" ] || { echo "$W isn't writable by this account: run ./install.sh from an administrator account"; exit 1; }
 mkdir -p "$DIR/gui" "$HOME/Library/LaunchAgents"
 # Builds before the switch moved into the engine said "off" by unloading the agent. Keep that off, as the app would,
 # rather than quietly turning Red Light back on by loading the agent again. Decided now, before anything is replaced:
@@ -91,7 +94,8 @@ rm -f "$DIR/launchd.out.log"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 # bootout returns before the old job is gone, and bootstrap fails ("Input/output error") until it is.
 for i in {1..20}; do launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null && break; sleep 0.25; done
-launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || { echo "could not load the agent: launchctl bootstrap gui/$(id -u) \"$PLIST\""; exit 1; }
+launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || { echo "could not load the agent: launchctl bootstrap gui/$(id -u) \"$PLIST\""
+     echo "(if Red Light is switched off in System Settings › General › Login Items › Allow in the Background, switch it on and run ./install.sh again)"; exit 1; }
 open "$APP"
 echo
 echo "Red Light is installed. Look for the sunset icon in the menu bar."
