@@ -1261,10 +1261,13 @@ struct Panel: View {
         if m.isNight { return m.sunriseText.isEmpty ? "Night" : "Night · Sunrise at \(m.sunriseText)" }
         return m.sunsetText.isEmpty ? "Day" : "Day · Sunset at \(m.sunsetText)"
     }
+    /// What applying it would change nothing of. A preset without a keyboard or shade value leaves those alone when
+    /// applied (only warmth defaults, to 0), so a missing one matches whatever is there rather than counting as off.
     func isCurrent(_ p: Preset) -> Bool {
         let s = p.settings
-        let kbOK = abs((s.keyboardBrightness ?? 0) - (m.live.keyboardBrightness ?? 0)) < 0.0015
-        let shadeOK = (s.shadeEnabled ?? false) == m.shade.enabled && (!m.shade.enabled || abs((s.shadeLevel ?? 0) - m.shade.level) < 0.02)
+        let kbOK = s.keyboardBrightness.map { abs($0 - (m.live.keyboardBrightness ?? 0)) < 0.0015 } ?? true
+        let shadeOK = (s.shadeEnabled ?? m.shade.enabled) == m.shade.enabled
+            && (!m.shade.enabled || s.shadeLevel.map { abs($0 - m.shade.level) < 0.02 } ?? true)
         let warmOK = abs((s.warmth ?? 0) - (m.live.warmth ?? 0)) < 0.03
         return kbOK && shadeOK && warmOK
     }
