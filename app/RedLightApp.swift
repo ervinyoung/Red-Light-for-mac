@@ -157,6 +157,15 @@ func runStatus(_ exe: String, _ args: [String]) -> (out: String, ok: Bool) {
     return (String(data: data, encoding: .utf8) ?? "", p.terminationStatus == 0)
 }
 @discardableResult func cli(_ args: String...) -> String { runStatus(cliURL.path, args).out }
+/// Runs `body` holding the engine's own lock (flock on .lock), for a read-modify-write of a file the engine writes too.
+/// Bounded the way the engine bounds its wait, so a hung engine run can't wedge the app.
+func withEngineLock(_ body: () -> Void) {
+    let fd = open(appDir.appendingPathComponent(".lock").path, O_CREAT | O_RDWR, 0o644)
+    var waited = 0
+    while fd >= 0 && flock(fd, LOCK_EX | LOCK_NB) != 0 && waited < 500 { usleep(20_000); waited += 1 }
+    body()
+    if fd >= 0 { close(fd) }                // closing releases the lock
+}
 
 // MARK: - Screen shade overlay
 final class ShadeOverlay {
@@ -645,6 +654,7 @@ final class Model: ObservableObject {
     /// Slider steps queued for the engine and not yet applied. While any are, what the engine reports is a step
     /// behind the finger, and reading it back would snap the thumb, the header and the screen back to that step.
     private var setsInFlight = 0
+    private var shadesInFlight = 0          // shade on/off and level queued for shade.json and not yet written
     private var hotkeysLive: Bool?          // whether the shortcuts were last registered for on (true) or off (false)
 
     init() {
@@ -748,6 +758,7 @@ final class Model: ObservableObject {
         learned = (try? Data(contentsOf: learnedURL)).flatMap { try? dec.decode(Learned.self, from: $0) } ?? Learned()
         var sh = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? Shade()
         if setsInFlight > 0 { sh.warmth = shade.warmth; sh.gammaBlue = shade.gammaBlue; sh.gammaGreen = shade.gammaGreen }
+        if shadesInFlight > 0 { sh.enabled = shade.enabled; sh.level = shade.level }     // likewise for setShade()
         shade = sh
         if switchesInFlight == 0 { enabled = !(state?.disabled ?? false) }
         if keysChanged || hotkeysLive != !isOff { registerHotkeys() }
@@ -814,13 +825,24 @@ final class Model: ObservableObject {
     func setShade(enabled: Bool? = nil, level: Double? = nil) {
         guard !isOff else { return }
         bringBackIfHeld()
-        // From disk, not the last refresh: the engine may have written warmth and gamma since (a fade step).
-        var s = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? shade
-        if setsInFlight > 0 { s.warmth = shade.warmth; s.gammaBlue = shade.gammaBlue; s.gammaGreen = shade.gammaGreen }   // as in refresh()
-        if let e = enabled { s.enabled = e }
-        if let l = level { s.level = max(0, min(0.9, l)); if l > 0 && enabled == nil { s.enabled = true } }
+        func change(_ s: inout Shade) {
+            if let e = enabled { s.enabled = e }
+            if let l = level { s.level = max(0, min(0.9, l)); if l > 0 && enabled == nil { s.enabled = true } }
+        }
+        var s = shade; change(&s)
         shade = s; drawLook()
-        try? enc.encode(s).write(to: shadeURL, options: .atomic)
+        // The engine read-modify-writes shade.json under its lock (every fade step, `set`, a preset). Written beside
+        // it, this could put back the warmth it had just written, or be lost under its save. So: under the same lock,
+        // onto what is on disk then, only these two fields — queued behind any slider steps, like them.
+        shadesInFlight += 1
+        liveQueue.async { [weak self] in
+            withEngineLock {
+                var d = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? s
+                change(&d)
+                try? enc.encode(d).write(to: shadeURL, options: .atomic)
+            }
+            DispatchQueue.main.async { guard let self = self else { return }; self.shadesInFlight -= 1; self.scheduleRefresh(after: 0.05) }
+        }
     }
     /// Touching the look during true colour means you want to see it: that is "Bring Red Light Back", first. Otherwise
     /// the change would be saved but invisible — and the engine's `set` would turn the tint leg on under a hold
