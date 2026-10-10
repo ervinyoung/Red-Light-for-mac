@@ -2,7 +2,7 @@
 // and quietly learns from manual adjustments.
 // Usage: redlight check | night | day | pause <min>|sunrise | resume | set <field> <value> | preset … |
 //        shade … | location <lat> <lon> [auto|manual] | reapply | status | suntimes | learned | forget |
-//        on | off | hold <app> | release
+//        on | off | hold <app> | release | curve
 import Foundation
 
 let appDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/RedLight")
@@ -57,6 +57,16 @@ struct Learning: Codable {
     var minNights: Int = 3
     var lookbackDays: Int = 14
     var maxOffsetMinutes: Double = 120
+    init() {}
+    /// Lenient, as in the app: a hand-edited partial block ({"enabled": false}) failed the whole config and stopped
+    /// the schedule while the pane looked fine. Missing or malformed fields take their defaults.
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? true
+        minNights = (try? c.decode(Int.self, forKey: .minNights)) ?? 3
+        lookbackDays = (try? c.decode(Int.self, forKey: .lookbackDays)) ?? 14
+        maxOffsetMinutes = (try? c.decode(Double.self, forKey: .maxOffsetMinutes)) ?? 120
+    }
 }
 struct Preset: Codable { var name: String; var icon: String; var settings: Settings }
 struct Config: Codable {
@@ -209,7 +219,7 @@ func apply(_ s: Settings, label: String, quiet: Bool = false) {
         if let t = s.filterType { maSetType(colorCategory, t) }
         if let h = s.hue { maSetHue(h) }
         if let i = s.intensity { maSetInten(i) }
-        if let e = s.filterEnabled { maSetEnabled(colorCategory, e) }
+        if let e = s.filterEnabled { maSetEnabled(colorCategory, e && !holdTint) }   // `set tint` under a hold waits too
         if s.shadeEnabled != nil || s.shadeLevel != nil {
             var sh = loadShade()
             if let e = s.shadeEnabled { sh.enabled = e }
@@ -314,8 +324,13 @@ func transitions(cfg: Config, learned: Learned, now: Date) -> [(at: Date, night:
 }
 func isNight(cfg: Config, learned: Learned, now: Date) -> Bool {
     let ts = transitions(cfg: cfg, learned: learned, now: now)
-    if let last = ts.last(where: { $0.at <= now }) { return last.night }
-    if let next = ts.first { return !next.night }
+    // A day with no sunrise or sunset is polar day or night throughout, whatever the switches around it say: the midnight
+    // sun's last day is followed by a sunrise, and reading that as "night until then" kept the screen red all day.
+    let today = sunTimes(lat: cfg.latitude, lon: cfg.longitude, date: now)
+    if today.rise != nil || today.set != nil {
+        if let last = ts.last(where: { $0.at <= now }) { return last.night }
+        if let next = ts.first { return !next.night }   // a location far east of the Mac's zone: its day starts later
+    }
     let m = Calendar.current.component(.month, from: now)   // polar day or night: no sunrise or sunset for days
     return cfg.latitude > 0 ? (m >= 10 || m <= 3) : (m >= 4 && m <= 9)
 }
@@ -406,6 +421,9 @@ func observe(cfg: Config, learned: Learned, state: State, now: Date) -> (State, 
     // filter off" — which the timing rules would read as turning red light off and move sunrise or sunset.
     if prev.warmth == cur.warmth { changed("filterEnabled", prev.filterEnabled.map { $0 ? 1 : 0 }, cur.filterEnabled.map { $0 ? 1 : 0 }, tol: 0.5) }
     changed("keyboardBrightness", prev.keyboardBrightness, cur.keyboardBrightness, tol: 0.005)
+    // Under auto-brightness the level isn't read, so a keyboard slider (auto off) or the system's own switch (auto on)
+    // went unseen and a fade turned it straight back. Not a lesson — one side has no level — but the fade must keep it.
+    if let a = prev.keyboardAutoBrightness, let b = cur.keyboardAutoBrightness, a != b { fields.insert("keyboardBrightness") }
     changed("keyboardIdleDimSeconds", prev.keyboardIdleDimSeconds, cur.keyboardIdleDimSeconds, tol: 0.5)
     changed("shadeEnabled", prev.shadeEnabled.map { $0 ? 1 : 0 }, cur.shadeEnabled.map { $0 ? 1 : 0 }, tol: 0.5)
     changed("shadeLevel", prev.shadeLevel, cur.shadeLevel, tol: 0.02)
@@ -527,7 +545,8 @@ func startTransition(to mode: String, cfg: Config, learned: Learned, state: Stat
     let target: Settings
     if mode == "night" {
         switch st.mode {
-        case "day": st.daySnapshot = st.ramp?.to ?? readCurrent()   // mid-sunrise (woken at night): where it was going, not a half-faded frame
+        // mid-sunrise (woken at night): where it was going, not a half-faded frame. One a preset took first wins.
+        case "day": st.daySnapshot = st.daySnapshot ?? st.ramp?.to ?? readCurrent()
         case "night": break
         default: st.daySnapshot = nil
         }
@@ -535,7 +554,13 @@ func startTransition(to mode: String, cfg: Config, learned: Learned, state: Stat
     } else {
         target = dayLook(cfg: cfg, state: st)
     }
-    let from = readCurrent()
+    var from = readCurrent()
+    // Under auto-brightness readCurrent has no level, and a fade from nothing snapped the keyboard to night at once.
+    // The hardware does report what auto chose (unless idle-dimmed, when it says 0), so ease from that.
+    if from.keyboardBrightness == nil, let id = kbIDs().first,
+       !kbGetBool("isBacklightDimmedOnKeyboard:", id), !kbGetBool("isBacklightSuppressedOnKeyboard:", id) {
+        from.keyboardBrightness = Double(kbGetFloat("brightnessForKeyboard:", id))
+    }
     st.mode = mode
     st.ramp = nil
     // If we woke up mid-transition, pick the fade up where the clock says it should be.
@@ -602,10 +627,9 @@ func turnOff(_ st: inout State, cfg: Config, reason: String) {
 }
 /// Suspends only the tint leg; the app sees `heldFor` and draws neither gamma nor shade meanwhile.
 func suppressTint() { if maGetType(colorCategory) == 16 { maSetEnabled(colorCategory, false) } }
-func restoreTint() {
-    let c = warmthCurve(loadShade().warmth ?? 0)
-    maSetType(colorCategory, 16); maSetHue(1.0); maSetInten(c.tint); maSetEnabled(colorCategory, c.tint > 0.001)
-}
+/// Brings back the tint underneath — the curve's or a custom `set tint` — from the filter prefs, which apply keeps
+/// current under a hold. Recomputing it from warmth replaced a custom tint, and forced type 16 over a filter of your own.
+func restoreTint() { if maGetType(colorCategory) == 16 { maSetEnabled(colorCategory, maGetInten() > 0.001) } }
 /// The switch is recorded as on (`false`), never left nil: the app reads a missing `disabled` as a build from before
 /// the switch, which said "off" by unloading the agent, and would turn Red Light off whenever it found the agent unloaded.
 func blank() -> State { var s = State(mode: "unset", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil); s.disabled = false; return s }
@@ -627,8 +651,10 @@ if !["status", "suntimes", "learned", "curve"].contains(cmd) {
     while fd >= 0 && flock(fd, LOCK_EX | LOCK_NB) != 0 && waited < 500 { usleep(20_000); waited += 1 }   // hung run can't wedge the rest
 }
 // A config.json that won't parse stops the schedule (no location), but never the switch: off, true colour, and an
-// off check need nothing from it but the day defaults, and the plain normal look will do for those.
-let needsNoSun = ["off", "hold", "release"].contains(cmd) || (cmd == "check" && loadState()?.disabled == true)
+// off check need nothing from it but the day defaults, and the plain normal look will do for those. Sliders (`set`),
+// the shade keys, `forget` and `curve` read nothing from it at all, and refusing them left the pane's controls dead.
+// (Never `location` or `preset`: they save the config back, and would write this placeholder over the real one.)
+let needsNoSun = ["off", "hold", "release", "set", "shade", "forget", "curve"].contains(cmd) || (cmd == "check" && loadState()?.disabled == true)
 guard let cfg = loadConfig() ?? (needsNoSun ? Config(latitude: 0, longitude: 0, night: Settings(), dayDefaults: Settings()) : nil) else { exit(1) }
 var learned = loadLearned()
 let now = Date()
@@ -701,16 +727,19 @@ case "off":
 case "hold":
     // redlight hold <app name>: true colour while a colour-critical app is in front
     var st = loadState() ?? blank()
-    guard st.disabled != true, CommandLine.arguments.count > 2 else { exit(0) }
+    // Not while paused either: nothing is red to hold, and a hold left over when the pause ran out kept the tint off.
+    guard st.disabled != true, st.pausedUntil.map({ now >= $0 }) ?? true, CommandLine.arguments.count > 2 else { exit(0) }
     st.heldFor = CommandLine.arguments[2]
-    suppressTint(); st.lastSeen = readCurrent()
+    // Only the tint flag is ours to re-read: a whole fresh lastSeen swallowed a slider or shade change made in the
+    // minute before, so the fade's next step ran straight over it (the app writes the shade before its release lands).
+    suppressTint(); st.lastSeen?.filterEnabled = maGetEnabled(colorCategory)
     saveState(st); log("true colour for \(st.heldFor!)")
 case "release":
     var st = loadState() ?? blank()
     guard let who = st.heldFor else { exit(0) }
     st.heldFor = nil
     if st.disabled != true { restoreTint() }
-    st.lastSeen = readCurrent()
+    st.lastSeen?.filterEnabled = maGetEnabled(colorCategory)   // as in hold: the tint flag only
     saveState(st); log("red light back after \(who)")
 case "pause":
     // redlight pause <minutes> | sunrise
@@ -724,6 +753,12 @@ case "pause":
     else { print("usage: redlight pause <minutes>|sunrise"); exit(2) }
     if st.mode == "night" { st = startTransition(to: "day", cfg: cfg, learned: learned, state: st, now: now, fade: 0) }
     else if st.ramp != nil { stepRamp(&st, now: .distantFuture) }   // mid-sunrise: finish it, don't freeze half red
+    else if anythingRed() {
+        // By day too: a preset applied before sunset stayed red through the pause — and with a hold just cleared
+        // above, the app drew back the red it had been hiding. Red and shade only; the keyboard is yours by day.
+        let d = dayLook(cfg: cfg, state: st); var s = Settings(); s.warmth = d.warmth; s.shadeEnabled = d.shadeEnabled
+        apply(s, label: "DAY (paused)"); st.lastSeen = readCurrent()
+    }
     st.pausedUntil = until
     saveState(st); log("paused until \(fmt.string(from: until))"); print("paused until \(fmt.string(from: until))")
 case "resume":
@@ -761,7 +796,8 @@ case "set":
         s.keyboardIdleDimSeconds = num
     case "shade": if off { s.shadeEnabled = false } else { s.shadeEnabled = num > 0; s.shadeLevel = max(0, min(0.9, num / 100)) }
     case "tint":   // advanced: drive the color filter directly, outside the warmth curve
-        if off { s.filterEnabled = false } else { s.filterEnabled = true; s.filterType = 16; s.hue = 1.0; s.intensity = max(0, min(1, num / 100)) }
+        // off zeroes the intensity too, so a release doesn't read it as a tint to bring back
+        if off { s.filterEnabled = false; s.intensity = 0 } else { s.filterEnabled = true; s.filterType = 16; s.hue = 1.0; s.intensity = max(0, min(1, num / 100)) }
     default: print("unknown field '\(field)' — use warmth, keyboard, idle, shade or tint"); exit(2)
     }
     apply(s, label: "SET \(field)")
@@ -777,6 +813,9 @@ case "preset":
     case "apply":
         guard let p = find() else { print("no preset named \(name)"); exit(1) }
         refuseIfOff(); honourHold()
+        // A preset by day is an evening look put on early: keep the day keyboard from before it for sunrise to bring
+        // back, not the preset's 0.3 % the sunset snapshot would find. (The snapshot is always empty in day mode.)
+        if var st = loadState(), st.mode == "day", st.daySnapshot == nil { st.daySnapshot = st.ramp?.to ?? readCurrent(); saveState(st) }
         var s = p.settings
         if s.warmth == nil { s.warmth = 0 }
         if s.keyboardBrightness != nil { s.keyboardAutoBrightness = false }
@@ -824,7 +863,7 @@ case "shade":
     case "down": sh.level = max(0, (sh.level - 0.1).rounded(toPlaces: 2)); if sh.level == 0 { sh.enabled = false }
     default:
         if let pct = Double(arg) { sh.level = max(0, min(0.9, pct / 100)); sh.enabled = sh.level > 0 }
-        else { print("usage: redlight shade on|off|toggle|up|down|<0-100>"); exit(2) }
+        else { print("usage: redlight shade on|off|toggle|up|down|<0-90>"); exit(2) }
     }
     saveShade(sh)
     print("shade \(sh.enabled ? "on" : "off") \(Int((sh.level * 100).rounded()))%")
@@ -867,5 +906,5 @@ case "forget":
 case "curve":
     for w in stride(from: 0.0, through: 1.0, by: 0.1) { let c = warmthCurve(w); print(String(format: "warmth %3.0f%%  blue %.2f  green %.2f  tint %.2f", w * 100, c.blue, c.green, c.tint)) }
 default:
-    print("usage: redlight on|off|check|night|day|pause|resume|hold|release|location|set|preset|shade|reapply|status|suntimes|learned|forget"); exit(2)
+    print("usage: redlight on|off|check|night|day|pause|resume|hold|release|location|set|preset|shade|reapply|status|suntimes|learned|forget|curve"); exit(2)
 }
