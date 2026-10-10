@@ -47,7 +47,8 @@ Red Light for Mac is not a medical device and makes no medical claims.
 The first time you open it, macOS asks you to confirm: System Settings › Privacy & Security › **Open Anyway**
 (the app isn't notarized). After that it sets itself up — the sunrise/sunset scheduler, your location for sun
 times, default presets — and keeps itself up to date: it checks GitHub once a day, installs only updates signed
-with the project's key, and only while no red is on screen. Settings › Updates turns that off.
+with the project's key, and only while no red is on screen. With Settings › Updates › Update Automatically off
+it still tells you when a new version is out, and installs only when you choose.
 
 To remove it: switch Red Light off, quit it, drag it to the Trash, then stop the sunset scheduler it installed:
 

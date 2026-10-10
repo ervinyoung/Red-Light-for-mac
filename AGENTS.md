@@ -41,7 +41,7 @@ How to uphold the rule in code:
 - Shared files live in `~/Library/Application Support/RedLight`. The engine serialises itself with `flock` on
   `.lock`; the app writes config.json by merging only the keys it changed, never a whole stale copy
 - Every launch of the app (not a `--snapshot` run) copies its bundled engine over the installed `redlight` in that
-  folder if they differ, seeds config.json if missing, and writes the LaunchAgent plist if missing. Whichever build
+  folder if they differ, seeds config.json if missing, and writes the LaunchAgent plist (rewriting it and reloading the agent when it differs). Whichever build
   you launch last owns the installed engine: one built there by hand lasts only until the next app launch
 - `tools/` — documentation images (`--snapshot` renders the pane off-screen to PNG; flags: `settings`, `daylight`,
   `light`, `clear`), the disk image (`make-dmg.sh`, `dmg-background.swift`) and update signing (`sign-update.swift`)
