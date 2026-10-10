@@ -59,13 +59,16 @@ let isSnapshotRun = CommandLine.arguments.contains("--snapshot")
 // MARK: - Gamma legs of warmth (channel scaling at the display's transfer table)
 final class Gamma {
     private var cache: [CGDirectDisplayID: ([CGGammaValue], [CGGammaValue], [CGGammaValue], UInt32)] = [:]
+    /// Displays with no transfer table to scale (Sidecar, AirPlay, some adapters). Without this they never get a cache
+    /// entry, so every apply restored ColorSync on all displays and verify() redrew every 2 s: a flicker while warm.
+    private var noTable: Set<CGDirectDisplayID> = []
     private(set) var blue: Double = 1, green: Double = 1
     init() {
         guard !isSnapshotRun else { return }
         CGDisplayRestoreColorSyncSettings()
         let reapply: (Notification) -> Void = { [weak self] _ in
             guard let self = self else { return }
-            self.cache = [:]; CGDisplayRestoreColorSyncSettings(); self.apply(blue: self.blue, green: self.green)
+            self.cache = [:]; self.noTable = []; CGDisplayRestoreColorSyncSettings(); self.apply(blue: self.blue, green: self.green)
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main, using: reapply)
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main, using: reapply)
@@ -74,17 +77,23 @@ final class Gamma {
     func apply(blue b: Double, green g: Double) {
         guard !isSnapshotRun else { return }
         blue = max(0, min(1, b)); green = max(0, min(1, g))
-        if blue >= 0.999 && green >= 0.999 { CGDisplayRestoreColorSyncSettings(); cache = [:]; return }
+        if blue >= 0.999 && green >= 0.999 {
+            // Undo only what we did. Restoring on every refresh all day long would wipe any other app's (or a
+            // calibrator's) tables once a minute; the cache is non-empty exactly while our tables are on screen.
+            if !cache.isEmpty { CGDisplayRestoreColorSyncSettings(); cache = [:] }
+            return
+        }
         var ids = [CGDirectDisplayID](repeating: 0, count: 16); var n: UInt32 = 0
         CGGetOnlineDisplayList(16, &ids, &n)
         // The baseline must be the display's own ColorSync table, never whatever is on it now: reading a table
         // that already carries a scaling (ours from before, or a process that just quit) applied red twice.
-        if ids.prefix(Int(n)).contains(where: { cache[$0] == nil }) { CGDisplayRestoreColorSyncSettings() }
-        for d in ids.prefix(Int(n)) {
+        let displays = ids.prefix(Int(n)).filter { !noTable.contains($0) }
+        if displays.contains(where: { cache[$0] == nil }) { CGDisplayRestoreColorSyncSettings() }
+        for d in displays {
             if cache[d] == nil {
                 let cap = CGDisplayGammaTableCapacity(d)
                 var r = [CGGammaValue](repeating: 0, count: Int(cap)), gg = r, bb = r; var got: UInt32 = 0
-                guard CGGetDisplayTransferByTable(d, cap, &r, &gg, &bb, &got) == .success else { continue }
+                guard CGGetDisplayTransferByTable(d, cap, &r, &gg, &bb, &got) == .success, got > 0 else { noTable.insert(d); continue }
                 cache[d] = (r, gg, bb, got)
             }
             let (r, gg, bb, got) = cache[d]!
@@ -97,7 +106,7 @@ final class Gamma {
         guard !isSnapshotRun, blue < 0.999 || green < 0.999 else { return }
         var ids = [CGDirectDisplayID](repeating: 0, count: 16); var n: UInt32 = 0
         CGGetOnlineDisplayList(16, &ids, &n)
-        for d in ids.prefix(Int(n)) {
+        for d in ids.prefix(Int(n)) where !noTable.contains(d) {
             guard let (_, gg, bb, got) = cache[d], got > 0 else { apply(blue: blue, green: green); return }
             let cap = CGDisplayGammaTableCapacity(d)
             var r = [CGGammaValue](repeating: 0, count: Int(cap)), g2 = r, b2 = r; var now: UInt32 = 0
@@ -252,6 +261,7 @@ final class TrueColorWatcher {
     private unowned let m: Model
     private var askedTonight: Set<String> = []
     private var declinedHere: String?          // "Bring Red Light Back" pressed while this app stays in front
+    private var lastFront: String?             // the last app in front other than this one (opening the pane activates us)
     private var releaseWork: DispatchWorkItem?
     private var lastMode: String?
     private let prompt = TrueColorPrompt()
@@ -289,12 +299,15 @@ final class TrueColorWatcher {
         if let mode = m.state?.mode, mode != lastMode { if mode == "night" { askedTonight = [] }; lastMode = mode }
         if let app = NSWorkspace.shared.frontmostApplication { consider(app) }
     }
+    /// The pane's button is pressed with the pane in front, so the app being declined is the one that was in front
+    /// before it — not the frontmost app, which is this one.
     func bringBack() {
-        declinedHere = m.heldFor.flatMap { _ in NSWorkspace.shared.frontmostApplication?.bundleIdentifier }
+        declinedHere = m.heldFor.flatMap { _ in lastFront ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier }
         m.release()
     }
     private func consider(_ app: NSRunningApplication) {
         guard !m.snapshotMode, let id = app.bundleIdentifier, id != Bundle.main.bundleIdentifier else { return }   // opening this pane changes nothing
+        lastFront = id
         if declinedHere != nil && declinedHere != id { declinedHere = nil }
         guard isColorCritical(app) else {
             prompt.hide()
@@ -312,16 +325,18 @@ final class TrueColorWatcher {
         releaseWork?.cancel()
         let name = app.localizedName ?? "This app"
         guard m.enabled, !m.isPaused, m.isTinting || m.heldFor != nil, declinedHere != id else { return }
-        if m.heldFor != nil { if m.heldFor != name { m.hold(name) }; return }
         let p = policy
-        if p.never.contains(id) { return }
+        // Straight from one colour app to another the hold passes along — unless this one was told to keep red.
+        if p.never.contains(id) { if m.heldFor != nil { m.release() }; return }
+        if m.heldFor != nil { if m.heldFor != name { m.hold(name) }; return }
         if p.always.contains(id) { m.hold(name); return }
         guard p.ask, !askedTonight.contains(id), !prompt.isShowing else { return }
         askedTonight.insert(id)
         prompt.show(name: name, icon: app.icon ?? NSWorkspace.shared.icon(forFile: app.bundleURL?.path ?? "")) { [weak self] trueColor, rememberIt in
             guard let self = self else { return }
             if rememberIt { self.remember(id, always: trueColor) }
-            if trueColor, NSWorkspace.shared.frontmostApplication?.bundleIdentifier == id { self.m.hold(name) }
+            // The card waits up to 20 s; Red Light may have been switched off or paused under it meanwhile.
+            if trueColor, self.m.enabled, !self.m.isPaused, NSWorkspace.shared.frontmostApplication?.bundleIdentifier == id { self.m.hold(name) }
         }
     }
 }
@@ -343,7 +358,9 @@ final class TrueColorPrompt {
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         p.contentView = host
         // Under the menu bar item, the way its own pane opens; the menu bar's right end if it can't be found.
-        let item = NSApp.windows.first { String(describing: type(of: $0)).contains("NSStatusBarWindow") }?.frame
+        // With several displays each menu bar carries its own copy of the item: use the one where you are working.
+        let items = NSApp.windows.filter { String(describing: type(of: $0)).contains("NSStatusBarWindow") }
+        let item = (items.first { w in NSScreen.main.map { $0.frame.intersects(w.frame) } ?? false } ?? items.first)?.frame
         let screen = NSScreen.screens.first { sc in item.map { sc.frame.intersects($0) } ?? false } ?? NSScreen.main ?? NSScreen.screens[0]
         let vis = screen.visibleFrame, size = host.fittingSize
         var x = (item?.midX ?? vis.maxX - size.width / 2 - 8) - size.width / 2
@@ -398,16 +415,16 @@ final class Model: ObservableObject {
     @Published var learned = Learned()
     @Published var shade = Shade()
     @Published var sunLine = ""
-    @Published var agentRunning = false
     /// What the switch shows: the engine's persisted switch (state.json), set optimistically under the finger.
     /// It is never inferred from launchd — the agent stays loaded and the engine itself honours "off".
     @Published var enabled = true
-    private var enabledPending = false
+    private var switchesInFlight = 0        // `on`/`off` sent to the engine and not yet answered: a count, not a flag,
+                                            // so a quick off-on-off can't hand the switch back to a half-way state
     @Published var launchAtLogin = false
     @Published var recording: String? = nil
     @Published var live = Settings()
     @Published var locationDenied = false
-    var snapshotMode = false
+    var snapshotMode = isSnapshotRun
     var snapshotDaylight = false      // --snapshot … daylight, to capture the daytime state
     let overlay = ShadeOverlay()
     let gamma = Gamma()
@@ -418,19 +435,24 @@ final class Model: ObservableObject {
     private var monitor: Any?
     private var refreshWork: DispatchWorkItem?
     var lastKeyboard: Double? = nil
+    /// Slider steps queued for the engine and not yet applied. While any are, what the engine reports is a step
+    /// behind the finger, and reading it back would snap the thumb, the header and the screen back to that step.
+    private var setsInFlight = 0
 
     init() {
+        // A documentation snapshot is a second process beside the running app: it only reads. Gamma and the shade
+        // windows keep off the display themselves (isSnapshotRun); here: no hotkeys, no engine commands, no location
+        // prompt, and no true-colour watching that could send `hold`.
+        guard !snapshotMode else { refresh(); return }
         ensureAgent()
         refresh()
-        let fd = open(appDir.path, O_EVTONLY)
-        if fd >= 0 {
-            let src = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)
-            src.setEventHandler { [weak self] in self?.scheduleRefresh() }
-            src.setCancelHandler { close(fd) }
-            src.resume(); source = src
+        watchFolder()
+        Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            if self.source == nil { self.watchFolder() }       // the folder was missing last time: try again
+            self.refresh()
         }
-        Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.refresh() }
-        if !isSnapshotRun { Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.gamma.verify() } }
+        Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.gamma.verify() }
         registerHotkeys()
         // Waking up: run a check right away so the lid opening at 11 PM never shows 60 s of daylight look.
         let nc = NSWorkspace.shared.notificationCenter
@@ -453,12 +475,34 @@ final class Model: ObservableObject {
     var plistPath: String { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(agentLabel).plist").path }
     /// The agent is always loaded now. Builds before this one expressed "off" by unloading it, so an unloaded
     /// agent with no recorded switch is carried over as off before it is loaded again.
+    /// Once only, on this build's first launch. The engine now records "on" as `disabled: false`, so a missing key
+    /// should mean a pre-switch state — but the first engine with the switch wrote "on" as no key, and its state.json
+    /// stays that way until the new engine next runs. Read later, an unloaded agent (a login-order race, Background
+    /// Items switched off in System Settings) beside such a file would switch Red Light off by itself.
     func ensureAgent() {
+        let migrate = !UserDefaults.standard.bool(forKey: "switchCarriedOver")
+        UserDefaults.standard.set(true, forKey: "switchCarriedOver")
         let label = "gui/\(getuid())/\(agentLabel)"
         guard FileManager.default.fileExists(atPath: plistPath), !runStatus("/bin/launchctl", ["print", label]).ok else { return }
         let st = (try? Data(contentsOf: stateURL)).flatMap { try? dec.decode(ModeState.self, from: $0) }
-        if let st = st, st.disabled == nil { _ = runStatus(cliURL.path, ["off"]) }
+        if migrate, let st = st, st.disabled == nil { _ = runStatus(cliURL.path, ["off"]) }
         _ = runStatus("/bin/launchctl", ["bootstrap", "gui/\(getuid())", plistPath])
+    }
+    /// Every engine write is an atomic rename inside the folder, which the folder's own descriptor sees as a write.
+    /// If the folder itself is moved or deleted (a reinstall), that descriptor watches nothing ever again, so the
+    /// watch is opened afresh on the new folder — or on the minute timer, if it isn't back yet.
+    private func watchFolder() {
+        source?.cancel(); source = nil
+        let fd = open(appDir.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let src = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)
+        src.setEventHandler { [weak self, weak src] in
+            guard let self = self else { return }
+            if let ev = src?.data, !ev.isDisjoint(with: [.rename, .delete]) { self.watchFolder() }
+            self.scheduleRefresh()
+        }
+        src.setCancelHandler { close(fd) }
+        src.resume(); source = src
     }
     func locateIfAuto() { if config.locationSource != "manual" { locator.request() } }
     func useMyLocation() { config.locationSource = "auto"; saveConfig(reapply: false); locator.request() }
@@ -477,21 +521,29 @@ final class Model: ObservableObject {
         }
         state = (try? Data(contentsOf: stateURL)).flatMap { try? dec.decode(ModeState.self, from: $0) }
         learned = (try? Data(contentsOf: learnedURL)).flatMap { try? dec.decode(Learned.self, from: $0) } ?? Learned()
-        shade = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? Shade()
-        if !enabledPending { enabled = !(state?.disabled ?? false) }
+        var sh = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? Shade()
+        if setsInFlight > 0 { sh.warmth = shade.warmth; sh.gammaBlue = shade.gammaBlue; sh.gammaGreen = shade.gammaGreen }
+        shade = sh
+        if switchesInFlight == 0 { enabled = !(state?.disabled ?? false) }
         drawLook()
         trueColor.reconsider()
         if #available(macOS 13, *) { launchAtLogin = SMAppService.mainApp.status == .enabled }
         liveQueue.async { [weak self] in
             let sun = cli("suntimes").trimmingCharacters(in: .whitespacesAndNewlines)
             let status = cli("status")
-            let running = runStatus("/bin/launchctl", ["print", "gui/\(getuid())/\(agentLabel)"]).ok
-            DispatchQueue.main.async { guard let self = self else { return }; self.sunLine = sun; self.parseLive(status); self.agentRunning = running }
+            // Steps queued after this status (the queue is serial) make it stale; the final step refreshes again.
+            DispatchQueue.main.async { guard let self = self else { return }; self.sunLine = sun; if self.setsInFlight == 0 { self.parseLive(status) } }
         }
     }
     /// Off and true colour both mean the display is drawn exactly as macOS would draw it, whatever shade.json says.
-    var isOff: Bool { state?.disabled == true }
-    var heldFor: String? { state?.heldFor }
+    /// Off is what the switch shows as well as what the engine has recorded: while an `off` is on its way, a refresh
+    /// for some other reason must not paint the old red back under a switch that already says Off.
+    var isOff: Bool { !enabled || state?.disabled == true }
+    var heldFor: String? { heldPending ?? state?.heldFor }
+    /// `hold`/`release` sent and not yet recorded: like the switch, the screen and pane follow at once, and a refresh
+    /// in between neither paints the red back over a hold nor sends the same hold again.
+    private var heldPending: String?? = nil
+    private var holdsInFlight = 0
     var isTinting: Bool { !isOff && ((shade.warmth ?? 0) > 0.001 || shade.enabled) }
     func drawLook() {
         if isOff || heldFor != nil { overlay.apply(Shade()); gamma.apply(blue: 1, green: 1); return }
@@ -535,35 +587,56 @@ final class Model: ObservableObject {
     func forget() { runCLI(["forget"]) }
     func setShade(enabled: Bool? = nil, level: Double? = nil) {
         guard !isOff else { return }
+        bringBackIfHeld()
         // From disk, not the last refresh: the engine may have written warmth and gamma since (a fade step).
         var s = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? shade
+        if setsInFlight > 0 { s.warmth = shade.warmth; s.gammaBlue = shade.gammaBlue; s.gammaGreen = shade.gammaGreen }   // as in refresh()
         if let e = enabled { s.enabled = e }
         if let l = level { s.level = max(0, min(0.9, l)); if l > 0 && enabled == nil { s.enabled = true } }
-        shade = s; overlay.apply(s)
+        shade = s; drawLook()
         try? enc.encode(s).write(to: shadeURL, options: .atomic)
     }
+    /// Touching the look during true colour means you want to see it: that is "Bring Red Light Back", first. Otherwise
+    /// the change would be saved but invisible — and the engine's `set` would turn the tint leg on under a hold
+    /// while the gamma legs and shade stay off. `release` is queued ahead of the change, so the engine sees it first.
+    private func bringBackIfHeld() { if heldFor != nil { trueColor.bringBack() } }
     /// Warmth: paint the gamma legs now for immediate feedback; the engine applies the tint leg and records it.
     func setWarmth(_ w: Double, final: Bool) {
         guard !isOff else { return }
+        bringBackIfHeld()
         let c = warmthCurve(w)
         shade.warmth = w; shade.gammaBlue = c.blue; shade.gammaGreen = c.green
-        gamma.apply(blue: c.blue, green: c.green)
+        drawLook()
         set("warmth", w <= 0 ? "off" : String(format: "%.1f", w * 100), final: final)
     }
     /// The master switch. One engine command, persisted; the screen follows at once, before the engine replies.
     func setEnabled(_ on: Bool) {
         enabled = on                        // the switch moves under the finger, not a second later
-        enabledPending = true
-        if !on { overlay.apply(Shade()); gamma.apply(blue: 1, green: 1) }
+        switchesInFlight += 1
+        drawLook()                          // off: the normal display now; on: still normal until the engine is on
         liveQueue.async { [weak self] in
             guard let self = self else { return }
-            self.ensureAgent()
+            // The switch first, then the agent: loading it runs a `check` at once, which must find the switch
+            // already recorded rather than race the command and save state from before it.
             _ = runStatus(cliURL.path, [on ? "on" : "off"])
-            DispatchQueue.main.async { self.enabledPending = false; self.refresh() }
+            self.ensureAgent()
+            DispatchQueue.main.async { self.switchesInFlight -= 1; self.refresh() }
         }
     }
-    func hold(_ app: String) { overlay.apply(Shade()); gamma.apply(blue: 1, green: 1); runCLI(["hold", app]) }
-    func release() { runCLI(["release"]) }
+    func hold(_ app: String) { sendHold(app, ["hold", app]) }
+    func release() { sendHold(nil, ["release"]) }
+    private func sendHold(_ app: String?, _ args: [String]) {
+        objectWillChange.send()
+        heldPending = .some(app); holdsInFlight += 1
+        drawLook()
+        liveQueue.async { [weak self] in
+            _ = runStatus(cliURL.path, args)
+            DispatchQueue.main.async { guard let self = self else { return }
+                self.holdsInFlight -= 1
+                if self.holdsInFlight == 0 { self.heldPending = nil }
+                self.refresh() }
+        }
+    }
     func setLaunchAtLogin(_ on: Bool) {
         guard #available(macOS 13, *) else { return }
         do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch { NSLog("login item: \(error)") }
@@ -572,7 +645,10 @@ final class Model: ObservableObject {
     func registerHotkeys() {
         let hk = config.shortcuts ?? Shortcuts()
         HotKeys.shared.register([
-            (hk.toggleShade, { [weak self] in guard let s = self else { return }; s.setShade(enabled: !s.shade.enabled) }),
+            // "Lighter" all the way down leaves the level at 0; switching on at nothing would look like a dead key.
+            (hk.toggleShade, { [weak self] in guard let s = self else { return }
+                let on = !s.shade.enabled
+                s.setShade(enabled: on, level: on && s.shade.level < 0.05 ? shadeSteps[1].value : nil) }),
             (hk.shadeDown, { [weak self] in guard let s = self else { return }
                 let l = ((s.shade.enabled ? s.shade.level : 0) - 0.1).rounded(toPlaces: 2)
                 if l <= 0 { s.setShade(enabled: false, level: 0) } else { s.setShade(enabled: true, level: l) } }),
@@ -629,13 +705,16 @@ final class Model: ObservableObject {
         case "warmth": live.warmth = value == "off" ? 0 : (Double(value) ?? 0) / 100
         default: break
         }
+        setsInFlight += 1
         liveQueue.async { [weak self] in
             _ = cli("set", field, value)
-            if final { DispatchQueue.main.async { self?.scheduleRefresh(after: 0.05) } }
+            DispatchQueue.main.async { guard let self = self else { return }
+                self.setsInFlight -= 1
+                if final { self.scheduleRefresh(after: 0.05) } }
         }
     }
-    func applyPreset(_ p: Preset) { runCLI(["preset", "apply", p.name]) }
-    func useAtNight(_ p: Preset) { runCLI(["preset", "night", p.name]) }
+    func applyPreset(_ p: Preset) { bringBackIfHeld(); runCLI(["preset", "apply", p.name]) }
+    func useAtNight(_ p: Preset) { if isNight { bringBackIfHeld() }; runCLI(["preset", "night", p.name]) }   // at night it applies now
     func deletePreset(_ p: Preset) { runCLI(["preset", "delete", p.name]) }
     func saveCurrentAsPreset(_ name: String, icon: String) { runCLI(["preset", "save", name, icon]) }
     var nightPresetName: String? { config.nightPresetName }
