@@ -641,6 +641,7 @@ final class Model: ObservableObject {
     /// Slider steps queued for the engine and not yet applied. While any are, what the engine reports is a step
     /// behind the finger, and reading it back would snap the thumb, the header and the screen back to that step.
     private var setsInFlight = 0
+    private var hotkeysLive: Bool?          // whether the shortcuts were last registered for on (true) or off (false)
 
     init() {
         // A documentation snapshot is a second process beside the running app: it only reads. Gamma and the shade
@@ -733,10 +734,11 @@ final class Model: ObservableObject {
     }
     func refresh() {
         if snapshotDemo { demoLook(); return }
+        var keysChanged = false
         if let d = try? Data(contentsOf: configURL), let c = try? dec.decode(Config.self, from: d) {
             let hk = c.shortcuts ?? Shortcuts(), old = config.shortcuts ?? Shortcuts()
             config = c; diskConfig = c
-            if hk.toggleShade != old.toggleShade || hk.shadeDown != old.shadeDown || hk.shadeUp != old.shadeUp { registerHotkeys() }
+            keysChanged = hk.toggleShade != old.toggleShade || hk.shadeDown != old.shadeDown || hk.shadeUp != old.shadeUp
         }
         state = (try? Data(contentsOf: stateURL)).flatMap { try? dec.decode(ModeState.self, from: $0) }
         learned = (try? Data(contentsOf: learnedURL)).flatMap { try? dec.decode(Learned.self, from: $0) } ?? Learned()
@@ -744,6 +746,7 @@ final class Model: ObservableObject {
         if setsInFlight > 0 { sh.warmth = shade.warmth; sh.gammaBlue = shade.gammaBlue; sh.gammaGreen = shade.gammaGreen }
         shade = sh
         if switchesInFlight == 0 { enabled = !(state?.disabled ?? false) }
+        if keysChanged || hotkeysLive != !isOff { registerHotkeys() }
         drawLook()
         trueColor.reconsider()
         if #available(macOS 13, *) { launchAtLogin = SMAppService.mainApp.status == .enabled }
@@ -832,6 +835,7 @@ final class Model: ObservableObject {
     func setEnabled(_ on: Bool) {
         enabled = on                        // the switch moves under the finger, not a second later
         switchesInFlight += 1
+        if hotkeysLive != !isOff { registerHotkeys() }
         drawLook()                          // off: the normal display now; on: still normal until the engine is on
         liveQueue.async { [weak self] in
             guard let self = self else { return }
@@ -864,7 +868,10 @@ final class Model: ObservableObject {
     func registerHotkeys() {
         guard !snapshotMode else { return }     // refresh() calls this when the file's shortcuts differ from the defaults
         let hk = config.shortcuts ?? Shortcuts()
-        HotKeys.shared.register([
+        // Off, the shade keys can do nothing, so they are given back rather than swallowed (⌃⌥⌘↑ belongs to
+        // whatever app would otherwise get it). refresh() and setEnabled() re-register when that changes.
+        hotkeysLive = !isOff
+        HotKeys.shared.register(isOff ? [] : [
             // "Lighter" all the way down leaves the level at 0; switching on at nothing would look like a dead key.
             (hk.toggleShade, { [weak self] in guard let s = self else { return }
                 let on = !s.shade.enabled
