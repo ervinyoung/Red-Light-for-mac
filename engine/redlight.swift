@@ -535,7 +535,8 @@ func startTransition(to mode: String, cfg: Config, learned: Learned, state: Stat
     let target: Settings
     if mode == "night" {
         switch st.mode {
-        case "day": st.daySnapshot = st.ramp?.to ?? readCurrent()   // mid-sunrise (woken at night): where it was going, not a half-faded frame
+        // mid-sunrise (woken at night): where it was going, not a half-faded frame. One a preset took first wins.
+        case "day": st.daySnapshot = st.daySnapshot ?? st.ramp?.to ?? readCurrent()
         case "night": break
         default: st.daySnapshot = nil
         }
@@ -800,6 +801,9 @@ case "preset":
     case "apply":
         guard let p = find() else { print("no preset named \(name)"); exit(1) }
         refuseIfOff(); honourHold()
+        // A preset by day is an evening look put on early: keep the day keyboard from before it for sunrise to bring
+        // back, not the preset's 0.3 % the sunset snapshot would find. (The snapshot is always empty in day mode.)
+        if var st = loadState(), st.mode == "day", st.daySnapshot == nil { st.daySnapshot = st.ramp?.to ?? readCurrent(); saveState(st) }
         var s = p.settings
         if s.warmth == nil { s.warmth = 0 }
         if s.keyboardBrightness != nil { s.keyboardAutoBrightness = false }
