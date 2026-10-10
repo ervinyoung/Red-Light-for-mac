@@ -607,6 +607,12 @@ final class Updater: ObservableObject {
         get { UserDefaults.standard.object(forKey: "autoUpdate") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "autoUpdate"); objectWillChange.send() }
     }
+    /// A version that can't be installed from here (no write access, a swap that failed) isn't tried again on its
+    /// own; it stays offered, with the reason, for a manual Install. A newer version is tried afresh.
+    var blocked: String? {
+        get { UserDefaults.standard.string(forKey: "updateBlocked") }
+        set { UserDefaults.standard.set(newValue, forKey: "updateBlocked") }
+    }
     static var current: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
     /// Each dotted part counts by its leading digits, so "2.4-beta" is 2.4 (not 2.0) and "2.4.0-rc1" is 2.4.0.
     static func newer(_ a: String, than b: String) -> Bool {
@@ -620,7 +626,7 @@ final class Updater: ObservableObject {
         let last = UserDefaults.standard.object(forKey: "lastUpdateCheck") as? Date ?? .distantPast
         if Date().timeIntervalSince(last) > 86400 { check(userInitiated: false) }
         // Not while the panel (or the true-colour prompt) is open: the restart would pull it out from under the pointer.
-        if automatic, screenIsPlain, available != nil, !busy, NSApp.keyWindow?.isVisible != true { install() }
+        if automatic, screenIsPlain, let r = available, r.version != blocked, !busy, NSApp.keyWindow?.isVisible != true { install() }
     }
     /// Where this copy can't be replaced: a disk image, the read-only copy macOS runs a quarantined download from
     /// (App Translocation), or a folder this user can't write to. Checked before downloading, so a doomed install
@@ -629,7 +635,8 @@ final class Updater: ObservableObject {
         let here = Bundle.main.bundleURL
         let readOnly = (try? here.resourceValues(forKeys: [.volumeIsReadOnlyKey]))?.volumeIsReadOnly ?? false
         if readOnly || here.path.contains("/AppTranslocation/") { return "Move Red Light to Applications to update" }
-        if !FileManager.default.isWritableFile(atPath: here.deletingLastPathComponent().path) { return "Can’t update here: \(here.deletingLastPathComponent().path) isn’t writable" }
+        // A standard (non-admin) account and an app an administrator put in /Applications.
+        if !FileManager.default.isWritableFile(atPath: here.deletingLastPathComponent().path) { return "An administrator needs to install this update" }
         return nil
     }
     func check(userInitiated: Bool) {
@@ -647,25 +654,27 @@ final class Updater: ObservableObject {
                 func url(_ name: String) -> URL? { assets.first { $0["name"] as? String == name }.flatMap { ($0["browser_download_url"] as? String).flatMap(URL.init) } }
                 let v = tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
                 if Self.newer(v, than: Self.current), let z = url("Red-Light.zip"), let s = url("Red-Light.zip.sig") {
-                    self.available = Release(version: v, zip: z, sig: s); self.status = ""
+                    self.available = Release(version: v, zip: z, sig: s)
+                    self.status = v == self.blocked ? (Self.cannotReplaceHere ?? "Couldn’t install \(v) automatically") : ""
                 } else { self.available = nil; self.status = userInitiated ? "Up to Date" : "" }
             }
         }.resume()
     }
     func install() {
         guard let r = available, !busy else { return }
-        if let why = Self.cannotReplaceHere { status = why; return }
+        if let why = Self.cannotReplaceHere { status = why; blocked = r.version; return }
         busy = true; status = "Downloading \(r.version)…"
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let result = Self.download(r)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.busy = false
-                // A failure clears `available` (try again tomorrow): kept, the next tick would fetch it all again.
+                // A failed download clears `available` (try again tomorrow): kept, the next tick would fetch it all again.
+                // A failed swap won't go better tomorrow: that version is blocked from automatic installs instead.
                 switch result {
                 case .success(let staged):
                     self.status = "Restarting…"
-                    if let e = Self.replaceAndRelaunch(with: staged) { self.status = e.localizedDescription; self.available = nil }
+                    if let e = Self.replaceAndRelaunch(with: staged) { self.status = e.localizedDescription; self.blocked = r.version }
                 case .failure(let e): self.status = e.localizedDescription; self.available = nil
                 }
             }
