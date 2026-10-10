@@ -209,7 +209,7 @@ func apply(_ s: Settings, label: String, quiet: Bool = false) {
         if let t = s.filterType { maSetType(colorCategory, t) }
         if let h = s.hue { maSetHue(h) }
         if let i = s.intensity { maSetInten(i) }
-        if let e = s.filterEnabled { maSetEnabled(colorCategory, e) }
+        if let e = s.filterEnabled { maSetEnabled(colorCategory, e && !holdTint) }   // `set tint` under a hold waits too
         if s.shadeEnabled != nil || s.shadeLevel != nil {
             var sh = loadShade()
             if let e = s.shadeEnabled { sh.enabled = e }
@@ -616,10 +616,9 @@ func turnOff(_ st: inout State, cfg: Config, reason: String) {
 }
 /// Suspends only the tint leg; the app sees `heldFor` and draws neither gamma nor shade meanwhile.
 func suppressTint() { if maGetType(colorCategory) == 16 { maSetEnabled(colorCategory, false) } }
-func restoreTint() {
-    let c = warmthCurve(loadShade().warmth ?? 0)
-    maSetType(colorCategory, 16); maSetHue(1.0); maSetInten(c.tint); maSetEnabled(colorCategory, c.tint > 0.001)
-}
+/// Brings back the tint underneath — the curve's or a custom `set tint` — from the filter prefs, which apply keeps
+/// current under a hold. Recomputing it from warmth replaced a custom tint, and forced type 16 over a filter of your own.
+func restoreTint() { if maGetType(colorCategory) == 16 { maSetEnabled(colorCategory, maGetInten() > 0.001) } }
 /// The switch is recorded as on (`false`), never left nil: the app reads a missing `disabled` as a build from before
 /// the switch, which said "off" by unloading the agent, and would turn Red Light off whenever it found the agent unloaded.
 func blank() -> State { var s = State(mode: "unset", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil); s.disabled = false; return s }
@@ -784,7 +783,8 @@ case "set":
         s.keyboardIdleDimSeconds = num
     case "shade": if off { s.shadeEnabled = false } else { s.shadeEnabled = num > 0; s.shadeLevel = max(0, min(0.9, num / 100)) }
     case "tint":   // advanced: drive the color filter directly, outside the warmth curve
-        if off { s.filterEnabled = false } else { s.filterEnabled = true; s.filterType = 16; s.hue = 1.0; s.intensity = max(0, min(1, num / 100)) }
+        // off zeroes the intensity too, so a release doesn't read it as a tint to bring back
+        if off { s.filterEnabled = false; s.intensity = 0 } else { s.filterEnabled = true; s.filterType = 16; s.hue = 1.0; s.intensity = max(0, min(1, num / 100)) }
     default: print("unknown field '\(field)' — use warmth, keyboard, idle, shade or tint"); exit(2)
     }
     apply(s, label: "SET \(field)")
