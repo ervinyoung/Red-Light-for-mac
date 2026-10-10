@@ -94,9 +94,11 @@ final class Gamma {
     init() {
         guard !isSnapshotRun else { return }
         CGDisplayRestoreColorSyncSettings()
+        // No restore of its own here: by day it wiped other apps' and calibrators' tables at every wake. While warm,
+        // apply() restores anyway before it reads a fresh baseline, since the emptied cache has none.
         let reapply: (Notification) -> Void = { [weak self] _ in
             guard let self = self else { return }
-            self.cache = [:]; self.noTable = []; CGDisplayRestoreColorSyncSettings(); self.apply(blue: self.blue, green: self.green)
+            self.cache = [:]; self.noTable = []; self.apply(blue: self.blue, green: self.green)
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main, using: reapply)
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main, using: reapply)
