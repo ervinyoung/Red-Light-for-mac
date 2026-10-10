@@ -3,8 +3,8 @@
 #   app/build.sh                      → /Applications/Red Light.app
 #   app/build.sh "dist/Red Light.app" → a release build (release.sh)
 set -e
+APP="${1:-/Applications/Red Light.app}"; [[ "$APP" = /* ]] || APP="$PWD/$APP"    # relative to the caller, not app/
 cd "$(dirname "$0")"
-APP="${1:-/Applications/Red Light.app}"
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
 [ "$(xcrun --sdk macosx --show-sdk-version | cut -d. -f1)" -ge 26 ] || { echo "Red Light needs the macOS 26 SDK or later (Xcode or Command Line Tools 26)"; exit 1; }
 # The engine source sits beside app/ in the repo, and beside gui/ in an install.sh copy.
@@ -26,12 +26,15 @@ fi
 xattr -cr "$APP"
 # Signing: Developer ID (notarizable) if present, else Apple Development, else ad-hoc. A real identity keeps the
 # same designated requirement from build to build, so macOS remembers Location access across updates.
-IDS="$(security find-identity -v -p codesigning 2>/dev/null)"
-ID="${SIGN_ID:-$(print -r -- "$IDS" | grep -m1 -o '"Developer ID Application: [^"]*"' | tr -d '"')}"
-[ -n "$ID" ] || ID="$(print -r -- "$IDS" | grep -m1 -o '"Apple Development: [^"]*"' | tr -d '"')"
-[ -n "$ID" ] || ID="-"
-OPTS=(); [[ "$ID" == "Developer ID Application:"* ]] && OPTS=(--options runtime --timestamp)
+# Signed by certificate hash, not name: a renewed certificate beside the old one gives two identities with one name,
+# and codesign refuses an ambiguous name.
+IDS="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+LINE="$(print -r -- "$IDS" | grep -m1 '"Developer ID Application: ' || print -r -- "$IDS" | grep -m1 '"Apple Development: ' || true)"
+NAME="${SIGN_ID:-$(print -r -- "$LINE" | sed -n 's/^[^"]*"\(.*\)".*/\1/p')}"
+ID="${SIGN_ID:-$(print -r -- "$LINE" | awk '{print $2}')}"
+[ -n "$ID" ] || { ID="-"; NAME="ad-hoc"; }
+OPTS=(); [[ "$NAME" == "Developer ID Application:"* ]] && OPTS=(--options runtime --timestamp)
 codesign --force --sign "$ID" "${OPTS[@]}" "$APP/Contents/Helpers/redlight"
 codesign --force --sign "$ID" "${OPTS[@]}" "$APP"
 touch "$APP"     # Finder and the Dock pick up a changed icon
-echo "built $APP (signed: $ID)"
+echo "built $APP (signed: $NAME)"
