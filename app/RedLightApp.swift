@@ -494,11 +494,18 @@ enum Setup {
         }
     }
     /// Until Location Services answers, the sun is guessed from the time zone's own coordinates (zone.tab).
+    /// An old name (Asia/Calcutta, Europe/Kiev) isn't in zone.tab, but its zoneinfo file is a copy of its new name's.
+    /// A bare offset (UTC, Etc/GMT+5) has no place at all: then at least the longitude follows the offset, so sunset
+    /// lands in the evening rather than at San Francisco's sunset hour.
     static func timezoneCoordinates() -> (Double, Double) {
-        let id = TimeZone.current.identifier
-        guard let tab = try? String(contentsOfFile: "/usr/share/zoneinfo/zone.tab", encoding: .utf8) else { return (37.77, -122.42) }
-        for line in tab.split(separator: "\n") where !line.hasPrefix("#") {
-            let f = line.split(separator: "\t"); guard f.count >= 3, f[2] == id else { continue }
+        let tz = TimeZone.current, dir = "/usr/share/zoneinfo/"
+        var id = tz.identifier
+        let byOffset = (37.77, Double(tz.secondsFromGMT() - Int(tz.daylightSavingTimeOffset())) / 240)
+        guard let tab = try? String(contentsOfFile: dir + "zone.tab", encoding: .utf8) else { return byOffset }
+        let rows = tab.split(separator: "\n").filter { !$0.hasPrefix("#") }.map { $0.split(separator: "\t") }.filter { $0.count >= 3 }
+        if !rows.contains(where: { $0[2] == id }), let mine = FileManager.default.contents(atPath: dir + id),
+           let same = rows.first(where: { FileManager.default.contents(atPath: dir + $0[2]) == mine }) { id = String(same[2]) }
+        for f in rows where f[2] == id {
             let c = String(f[1]); guard let split = c.dropFirst().firstIndex(where: { $0 == "+" || $0 == "-" }) else { break }
             func deg(_ s: Substring, _ n: Int) -> Double {
                 let sign: Double = s.first == "-" ? -1 : 1, d = Array(s.dropFirst())
@@ -507,7 +514,7 @@ enum Setup {
             }
             return (deg(c[c.startIndex..<split], 2), deg(c[split...], 3))
         }
-        return (37.77, -122.42)
+        return byOffset
     }
     static func writeDefaultConfig() {
         let (la, lo) = timezoneCoordinates()
