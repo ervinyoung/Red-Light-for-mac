@@ -49,15 +49,20 @@ The first time you open it, macOS asks you to confirm: System Settings › Priva
 times, default presets — and keeps itself up to date: it checks GitHub once a day, installs only updates signed
 with the project's key, and only while no red is on screen. Settings › Updates turns that off.
 
-To remove it: switch Red Light off, quit it, and drag it to the Trash; `./uninstall.sh` also removes the scheduler
-and its files (`--all` deletes your settings too).
+To remove it: switch Red Light off, quit it, drag it to the Trash, then stop the sunset scheduler it installed:
+
+    launchctl bootout gui/$(id -u)/com.ervinyoung.redlight; rm ~/Library/LaunchAgents/com.ervinyoung.redlight.plist
+
+`rm -r ~/Library/Application\ Support/RedLight` also deletes your settings. From a clone, `./uninstall.sh` does
+all of this (`--all` includes settings).
 
 ### From source
 Xcode Command Line Tools (`xcode-select --install`), then:
 
     git clone https://github.com/ervinyoung/Red-Light-for-mac && cd Red-Light-for-mac && ./install.sh
 
-Run `./install.sh` again to update; your settings, what it has learned and the switch are kept.
+Run `./install.sh` again to update; your settings, what it has learned and the switch are kept. A source build
+also updates itself from GitHub releases like the download does, unless Settings › Updates is off.
 `./release.sh` builds the disk image, the update zip and its signature into `dist/`; `--publish` uploads them
 as a GitHub release (signing needs the update key in your login Keychain).
 
@@ -125,7 +130,8 @@ most once a day. `learned.json` holds what it adopted and a dated history; `redl
     events.jsonl     observed manual changes (pruned past the lookback window)
     shade.json       what the app should draw: shade overlay, warmth, gamma multipliers
     commanded.json   the keyboard brightness last set (the hardware reports 0 once it idle-dims)
-    redlight.log     transitions, noticed changes, learned adjustments
+    redlight         the engine, installed from inside the app on every launch
+    redlight.log     transitions, noticed changes, learned adjustments (rotated to redlight.log.1 at 1 MB)
     launchd.err.log  anything the agent's runs write to stderr
 
 ## Menu bar app
