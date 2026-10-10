@@ -862,6 +862,7 @@ final class Model: ObservableObject {
         refresh()
     }
     func registerHotkeys() {
+        guard !snapshotMode else { return }     // refresh() calls this when the file's shortcuts differ from the defaults
         let hk = config.shortcuts ?? Shortcuts()
         HotKeys.shared.register([
             // "Lighter" all the way down leaves the level at 0; switching on at nothing would look like a dead key.
