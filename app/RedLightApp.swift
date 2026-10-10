@@ -709,7 +709,7 @@ final class Model: ObservableObject {
         }
     }
     func applyPreset(_ p: Preset) { bringBackIfHeld(); runCLI(["preset", "apply", p.name]) }
-    func useAtNight(_ p: Preset) { runCLI(["preset", "night", p.name]) }
+    func useAtNight(_ p: Preset) { if isNight { bringBackIfHeld() }; runCLI(["preset", "night", p.name]) }   // at night it applies now
     func deletePreset(_ p: Preset) { runCLI(["preset", "delete", p.name]) }
     func saveCurrentAsPreset(_ name: String, icon: String) { runCLI(["preset", "save", name, icon]) }
     var nightPresetName: String? { config.nightPresetName }
