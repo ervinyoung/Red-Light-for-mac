@@ -573,7 +573,18 @@ final class Updater: ObservableObject {
     func tick(screenIsPlain: Bool) {
         let last = UserDefaults.standard.object(forKey: "lastUpdateCheck") as? Date ?? .distantPast
         if Date().timeIntervalSince(last) > 86400 { check(userInitiated: false) }
-        if automatic, screenIsPlain, available != nil, !busy { install() }
+        // Not while the panel (or the true-colour prompt) is open: the restart would pull it out from under the pointer.
+        if automatic, screenIsPlain, available != nil, !busy, NSApp.keyWindow?.isVisible != true { install() }
+    }
+    /// Where this copy can't be replaced: a disk image, the read-only copy macOS runs a quarantined download from
+    /// (App Translocation), or a folder this user can't write to. Checked before downloading, so a doomed install
+    /// isn't fetched again every minute.
+    static var cannotReplaceHere: String? {
+        let here = Bundle.main.bundleURL
+        let readOnly = (try? here.resourceValues(forKeys: [.volumeIsReadOnlyKey]))?.volumeIsReadOnly ?? false
+        if readOnly || here.path.contains("/AppTranslocation/") { return "Move Red Light to Applications to update" }
+        if !FileManager.default.isWritableFile(atPath: here.deletingLastPathComponent().path) { return "Can’t update here: \(here.deletingLastPathComponent().path) isn’t writable" }
+        return nil
     }
     func check(userInitiated: Bool) {
         guard !busy else { return }
@@ -597,45 +608,87 @@ final class Updater: ObservableObject {
     }
     func install() {
         guard let r = available, !busy else { return }
+        if let why = Self.cannotReplaceHere { status = why; return }
         busy = true; status = "Downloading \(r.version)…"
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let result = Self.download(r)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.busy = false
+                // A failure clears `available` (try again tomorrow): kept, the next tick would fetch it all again.
                 switch result {
-                case .success(let app): self.status = "Restarting…"; Self.replaceAndRelaunch(with: app)
-                case .failure(let e): self.status = e.localizedDescription; self.available = nil   // try again tomorrow
+                case .success(let staged):
+                    self.status = "Restarting…"
+                    if let e = Self.replaceAndRelaunch(with: staged) { self.status = e.localizedDescription; self.available = nil }
+                case .failure(let e): self.status = e.localizedDescription; self.available = nil
                 }
             }
         }
     }
     struct Failure: LocalizedError { let errorDescription: String? }
-    private static func download(_ r: Release) -> Result<URL, Error> {
-        func fetch(_ u: URL) -> Data? { try? Data(contentsOf: u) }      // background queue; small files
+    /// A GET with a deadline, on a background queue. Only a 200 counts: a 404 page or a rate-limit notice is no zip.
+    private static func fetch(_ u: URL) -> Data? {
+        var out: Data?; let done = DispatchSemaphore(value: 0)
+        let task = URLSession.shared.dataTask(with: URLRequest(url: u, timeoutInterval: 30)) { d, resp, _ in
+            if (resp as? HTTPURLResponse)?.statusCode == 200 { out = d }; done.signal() }
+        task.resume()
+        if done.wait(timeout: .now() + 300) == .timedOut { task.cancel(); return nil }
+        return out
+    }
+    /// The signed zip, unpacked into a folder on the same volume as this app (so the swap is a rename) and checked.
+    /// On failure the folder is removed; on success it is the caller's to remove.
+    private static func download(_ r: Release) -> Result<(app: URL, dir: URL), Error> {
         guard let zip = fetch(r.zip), let sigText = fetch(r.sig).flatMap({ String(data: $0, encoding: .utf8) }),
               let sig = Data(base64Encoded: sigText.trimmingCharacters(in: .whitespacesAndNewlines)) else { return .failure(Failure(errorDescription: "Download failed")) }
         guard let keyData = Data(base64Encoded: publicKey), let key = try? Curve25519.Signing.PublicKey(rawRepresentation: keyData),
               key.isValidSignature(sig, for: zip) else { return .failure(Failure(errorDescription: "Update signature didn’t match; not installed")) }
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("RedLightUpdate-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fm = FileManager.default
+        let dir = (try? fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: Bundle.main.bundleURL, create: true))
+            ?? fm.temporaryDirectory.appendingPathComponent("RedLightUpdate-\(UUID().uuidString)")
+        func fail(_ s: String) -> Result<(app: URL, dir: URL), Error> { try? fm.removeItem(at: dir); return .failure(Failure(errorDescription: s)) }
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         let zipURL = dir.appendingPathComponent("Red-Light.zip")
-        guard (try? zip.write(to: zipURL)) != nil, runStatus("/usr/bin/ditto", ["-x", "-k", zipURL.path, dir.path]).ok else { return .failure(Failure(errorDescription: "Couldn’t unpack the update")) }
+        guard (try? zip.write(to: zipURL)) != nil, runStatus("/usr/bin/ditto", ["-x", "-k", zipURL.path, dir.path]).ok else { return fail("Couldn’t unpack the update") }
         let app = dir.appendingPathComponent("Red Light.app")
         guard let info = Bundle(url: app)?.infoDictionary, info["CFBundleIdentifier"] as? String == Bundle.main.bundleIdentifier,
-              let v = info["CFBundleShortVersionString"] as? String, newer(v, than: current) else { return .failure(Failure(errorDescription: "The update wasn’t a newer Red Light")) }
+              let v = info["CFBundleShortVersionString"] as? String, newer(v, than: current) else { return fail("The update wasn’t a newer Red Light") }
+        guard codeSignatureMatches(app) else { return fail("The update’s code signature didn’t check out; not installed") }
         _ = runStatus("/usr/bin/xattr", ["-dr", "com.apple.quarantine", app.path])
-        return .success(app)
+        return .success((app, dir))
     }
-    /// Swap the bundle in place (one rename), then start the new copy once this one has gone.
-    private static func replaceAndRelaunch(with new: URL) {
-        let dest = Bundle.main.bundleURL
-        do { _ = try FileManager.default.replaceItemAt(dest, withItemAt: new) } catch { NSLog("update: \(error)"); return }
-        let pid = ProcessInfo.processInfo.processIdentifier
+    /// The new app's code signature must be intact (a broken one is killed at launch, leaving nothing running) and, if
+    /// this copy is signed by a team, made by the same team: a different signer would also cost the Location grant.
+    static func codeSignatureMatches(_ app: URL) -> Bool {
+        func team(_ u: URL) -> (valid: Bool, team: String?) {
+            var code: SecStaticCode?
+            guard SecStaticCodeCreateWithPath(u as CFURL, [], &code) == errSecSuccess, let code = code else { return (false, nil) }
+            let valid = SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate | kSecCSCheckNestedCode), nil) == errSecSuccess
+            var info: CFDictionary?
+            _ = SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &info)
+            return (valid, (info as? [String: Any])?[kSecCodeInfoTeamIdentifier as String] as? String)
+        }
+        let new = team(app)
+        guard new.valid else { return false }
+        if let mine = team(Bundle.main.bundleURL).team { return new.team == mine }
+        return true
+    }
+    /// Swap the bundle in place (one rename), then start the new copy once this one has gone. Returns why it couldn't.
+    private static func replaceAndRelaunch(with staged: (app: URL, dir: URL)) -> Error? {
+        defer { try? FileManager.default.removeItem(at: staged.dir) }
+        let dest: URL
+        do { dest = try FileManager.default.replaceItemAt(Bundle.main.bundleURL, withItemAt: staged.app) ?? Bundle.main.bundleURL }
+        catch { NSLog("update: \(error)"); return Failure(errorDescription: "Couldn’t replace Red Light; not updated") }
+        return relaunch(dest) ? nil : Failure(errorDescription: "Updated; quit and reopen Red Light to finish")
+    }
+    /// Starts `app` once this process has exited (two copies can't run at once). The path is an argument to the
+    /// script, never part of it, so a quote or a `$` in it stays a path; a failed `open` is tried once more.
+    @discardableResult static func relaunch(_ app: URL) -> Bool {
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", "while /bin/kill -0 \(pid) 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"\(dest.path)\""]
-        try? p.run()
+        p.arguments = ["-c", "while /bin/kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"$2\" || { sleep 2; /usr/bin/open \"$2\"; }",
+                       "sh", String(ProcessInfo.processInfo.processIdentifier), app.path]
+        do { try p.run() } catch { NSLog("relaunch: \(error)"); return false }    // stay running rather than vanish
         NSApp.terminate(nil)
+        return true
     }
 }
 
