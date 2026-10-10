@@ -1157,7 +1157,9 @@ struct Panel: View {
     // Daylight: a Control Center state row at the top of the pane says what the scheduler is doing
     // ("Waiting for sunset" + when, the way the Focus pane says "Do Not Disturb · off"), and the pane's
     // controls stay live underneath — nothing is dimmed, nothing is hidden behind glass.
-    var waiting: Bool { m.snapshotDaylight ? true : (m.enabled && !m.isNight && m.heldFor == nil) }
+    // A pause is not daylight: the engine pauses by switching to day, and "Waiting for sunset" at 11 PM hid the
+    // only way back, the Paused section's Resume row.
+    var waiting: Bool { m.snapshotDaylight ? true : (m.enabled && !m.isNight && !m.isPaused && m.heldFor == nil) }
 
     var mainPage: some View {
         VStack(spacing: 0) {
