@@ -715,7 +715,8 @@ case "off":
 case "hold":
     // redlight hold <app name>: true colour while a colour-critical app is in front
     var st = loadState() ?? blank()
-    guard st.disabled != true, CommandLine.arguments.count > 2 else { exit(0) }
+    // Not while paused either: nothing is red to hold, and a hold left over when the pause ran out kept the tint off.
+    guard st.disabled != true, st.pausedUntil.map({ now >= $0 }) ?? true, CommandLine.arguments.count > 2 else { exit(0) }
     st.heldFor = CommandLine.arguments[2]
     // Only the tint flag is ours to re-read: a whole fresh lastSeen swallowed a slider or shade change made in the
     // minute before, so the fade's next step ran straight over it (the app writes the shade before its release lands).
@@ -740,6 +741,12 @@ case "pause":
     else { print("usage: redlight pause <minutes>|sunrise"); exit(2) }
     if st.mode == "night" { st = startTransition(to: "day", cfg: cfg, learned: learned, state: st, now: now, fade: 0) }
     else if st.ramp != nil { stepRamp(&st, now: .distantFuture) }   // mid-sunrise: finish it, don't freeze half red
+    else if anythingRed() {
+        // By day too: a preset applied before sunset stayed red through the pause — and with a hold just cleared
+        // above, the app drew back the red it had been hiding. Red and shade only; the keyboard is yours by day.
+        let d = dayLook(cfg: cfg, state: st); var s = Settings(); s.warmth = d.warmth; s.shadeEnabled = d.shadeEnabled
+        apply(s, label: "DAY (paused)"); st.lastSeen = readCurrent()
+    }
     st.pausedUntil = until
     saveState(st); log("paused until \(fmt.string(from: until))"); print("paused until \(fmt.string(from: until))")
 case "resume":
