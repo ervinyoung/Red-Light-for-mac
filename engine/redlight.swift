@@ -57,6 +57,16 @@ struct Learning: Codable {
     var minNights: Int = 3
     var lookbackDays: Int = 14
     var maxOffsetMinutes: Double = 120
+    init() {}
+    /// Lenient, as in the app: a hand-edited partial block ({"enabled": false}) failed the whole config and stopped
+    /// the schedule while the pane looked fine. Missing or malformed fields take their defaults.
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? true
+        minNights = (try? c.decode(Int.self, forKey: .minNights)) ?? 3
+        lookbackDays = (try? c.decode(Int.self, forKey: .lookbackDays)) ?? 14
+        maxOffsetMinutes = (try? c.decode(Double.self, forKey: .maxOffsetMinutes)) ?? 120
+    }
 }
 struct Preset: Codable { var name: String; var icon: String; var settings: Settings }
 struct Config: Codable {
