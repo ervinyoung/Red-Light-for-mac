@@ -3,6 +3,7 @@ import AppKit
 import Carbon
 import CoreLocation
 import ServiceManagement
+import CryptoKit
 
 // MARK: - Shared files (same as the redlight CLI)
 let appDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/RedLight")
@@ -408,6 +409,179 @@ struct TrueColorPromptView: View {
     }
 }
 
+// MARK: - First launch: everything install.sh used to do, from inside the app
+/// A copy dragged to Applications has never seen Terminal. On every launch it makes sure the engine it carries
+/// (Contents/Helpers/redlight) is the one installed, that there is a config, and that the sunrise/sunset agent
+/// exists. Updating the app therefore updates the engine too. Files the user owns are never overwritten.
+enum Setup {
+    static var bundledEngine: URL { Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/redlight") }
+    static var plistURL: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(agentLabel).plist") }
+    static func ensure() {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: appDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: plistURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // The engine: replaced beside and renamed into place, so a check running right now never sees half a file.
+        if let new = try? Data(contentsOf: bundledEngine), (try? Data(contentsOf: cliURL)) != new {
+            let tmp = appDir.appendingPathComponent("redlight.new")
+            if (try? new.write(to: tmp)) != nil {
+                _ = try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tmp.path)
+                _ = rename(tmp.path, cliURL.path)
+            }
+        }
+        if !fm.fileExists(atPath: configURL.path) { writeDefaultConfig() }
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0"><dict>
+          <key>Label</key><string>\(agentLabel)</string>
+          <key>ProgramArguments</key><array><string>\(cliURL.path)</string><string>check</string></array>
+          <key>RunAtLoad</key><true/>
+          <key>StartInterval</key><integer>60</integer>
+          <key>AbandonProcessGroup</key><true/>
+          <key>StandardOutPath</key><string>/dev/null</string>
+          <key>StandardErrorPath</key><string>\(appDir.appendingPathComponent("launchd.err.log").path)</string>
+        </dict></plist>
+
+        """
+        if !fm.fileExists(atPath: plistURL.path) { try? plist.write(to: plistURL, atomically: true, encoding: .utf8) }
+    }
+    /// Until Location Services answers, the sun is guessed from the time zone's own coordinates (zone.tab).
+    static func timezoneCoordinates() -> (Double, Double) {
+        let id = TimeZone.current.identifier
+        guard let tab = try? String(contentsOfFile: "/usr/share/zoneinfo/zone.tab", encoding: .utf8) else { return (37.77, -122.42) }
+        for line in tab.split(separator: "\n") where !line.hasPrefix("#") {
+            let f = line.split(separator: "\t"); guard f.count >= 3, f[2] == id else { continue }
+            let c = String(f[1]); guard let split = c.dropFirst().firstIndex(where: { $0 == "+" || $0 == "-" }) else { break }
+            func deg(_ s: Substring, _ n: Int) -> Double {
+                let sign: Double = s.first == "-" ? -1 : 1, d = Array(s.dropFirst())
+                func num(_ a: Int, _ b: Int) -> Double { b <= d.count ? Double(String(d[a..<b])) ?? 0 : 0 }
+                return sign * (num(0, n) + num(n, n + 2) / 60 + num(n + 2, n + 4) / 3600)
+            }
+            return (deg(c[c.startIndex..<split], 2), deg(c[split...], 3))
+        }
+        return (37.77, -122.42)
+    }
+    static func writeDefaultConfig() {
+        let (la, lo) = timezoneCoordinates()
+        let json = """
+        {
+          "latitude": \(String(format: "%.2f", la)), "longitude": \(String(format: "%.2f", lo)), "locationSource": "timezone", "fadeMinutes": 30,
+          "night": { "warmth": 0.8, "keyboardBrightness": 0.003, "keyboardIdleDimSeconds": 5, "keyboardAutoBrightness": false, "shadeEnabled": false, "shadeLevel": 0.3 },
+          "dayDefaults": { "warmth": 0, "keyboardBrightness": 0.3, "keyboardIdleDimSeconds": 300, "keyboardAutoBrightness": true },
+          "learning": { "enabled": true, "minNights": 3, "lookbackDays": 14, "maxOffsetMinutes": 120 },
+          "nightPresetName": "Night",
+          "presets": [
+            { "name": "Dusk",       "icon": "sunset.fill",   "settings": { "warmth": 0.6, "keyboardBrightness": 0.01,  "keyboardIdleDimSeconds": 30, "shadeEnabled": false, "shadeLevel": 0.2 } },
+            { "name": "Night",      "icon": "moon.fill",     "settings": { "warmth": 0.8, "keyboardBrightness": 0.003, "keyboardIdleDimSeconds": 5,  "shadeEnabled": false, "shadeLevel": 0.2 } },
+            { "name": "Deep night", "icon": "moon.zzz.fill", "settings": { "warmth": 1.0, "keyboardBrightness": 0.001, "keyboardIdleDimSeconds": 5,  "shadeEnabled": true,  "shadeLevel": 0.4 } },
+            { "name": "Movie",      "icon": "film.fill",     "settings": { "warmth": 0.6, "keyboardBrightness": 0.0,   "keyboardIdleDimSeconds": 5,  "shadeEnabled": true,  "shadeLevel": 0.4 } }
+          ],
+          "shortcuts": {
+            "toggleShade": { "keyCode": 1,   "modifiers": ["control", "option", "command"] },
+            "shadeUp":     { "keyCode": 126, "modifiers": ["control", "option", "command"] },
+            "shadeDown":   { "keyCode": 125, "modifiers": ["control", "option", "command"] }
+          }
+        }
+
+        """
+        let tmp = appDir.appendingPathComponent("config.json.new")
+        if (try? json.write(to: tmp, atomically: true, encoding: .utf8)) != nil { _ = rename(tmp.path, configURL.path) }
+    }
+}
+
+// MARK: - Updates
+/// Looks at the latest GitHub release once a day. A release carries `Red-Light.zip` and `Red-Light.zip.sig`, an
+/// Ed25519 signature made with a key that only the publisher holds; nothing unsigned is ever installed. Updates
+/// install themselves only while no red is on screen, because restarting the app hands the display back to
+/// macOS for a moment and a flash of daylight at midnight is exactly what this app exists to prevent.
+final class Updater: ObservableObject {
+    static let publicKey = "1IXQjjlRtoOiXOK+teUPVQ86g4G99H1gyPQMlN6rbXY="
+    static let feed = URL(string: ProcessInfo.processInfo.environment["REDLIGHT_UPDATE_FEED"]
+        ?? "https://api.github.com/repos/ervinyoung/Red-Light-for-mac/releases/latest")!
+    struct Release { let version: String; let zip: URL; let sig: URL }
+    @Published var available: Release?
+    @Published var status = ""
+    @Published var busy = false
+    var automatic: Bool {
+        get { UserDefaults.standard.object(forKey: "autoUpdate") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "autoUpdate"); objectWillChange.send() }
+    }
+    static var current: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
+    static func newer(_ a: String, than b: String) -> Bool {
+        let x = a.split(separator: ".").map { Int($0) ?? 0 }, y = b.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(x.count, y.count) { let p = i < x.count ? x[i] : 0, q = i < y.count ? y[i] : 0; if p != q { return p > q } }
+        return false
+    }
+    /// Called every minute by the model. Checks at most daily; installs when allowed and the screen is plain.
+    func tick(screenIsPlain: Bool) {
+        let last = UserDefaults.standard.object(forKey: "lastUpdateCheck") as? Date ?? .distantPast
+        if Date().timeIntervalSince(last) > 86400 { check(userInitiated: false) }
+        if automatic, screenIsPlain, available != nil, !busy { install() }
+    }
+    func check(userInitiated: Bool) {
+        guard !busy else { return }
+        busy = true; if userInitiated { status = "Checking…" }
+        var req = URLRequest(url: Self.feed); req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.busy = false
+                UserDefaults.standard.set(Date(), forKey: "lastUpdateCheck")
+                guard let data = data, let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let tag = j["tag_name"] as? String, let assets = j["assets"] as? [[String: Any]] else {
+                    if userInitiated { self.status = "Couldn’t reach GitHub" }; return }
+                func url(_ name: String) -> URL? { assets.first { $0["name"] as? String == name }.flatMap { ($0["browser_download_url"] as? String).flatMap(URL.init) } }
+                let v = tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+                if Self.newer(v, than: Self.current), let z = url("Red-Light.zip"), let s = url("Red-Light.zip.sig") {
+                    self.available = Release(version: v, zip: z, sig: s); self.status = ""
+                } else { self.available = nil; self.status = userInitiated ? "Up to Date" : "" }
+            }
+        }.resume()
+    }
+    func install() {
+        guard let r = available, !busy else { return }
+        busy = true; status = "Downloading \(r.version)…"
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let result = Self.download(r)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.busy = false
+                switch result {
+                case .success(let app): self.status = "Restarting…"; Self.replaceAndRelaunch(with: app)
+                case .failure(let e): self.status = e.localizedDescription; self.available = nil   // try again tomorrow
+                }
+            }
+        }
+    }
+    struct Failure: LocalizedError { let errorDescription: String? }
+    private static func download(_ r: Release) -> Result<URL, Error> {
+        func fetch(_ u: URL) -> Data? { try? Data(contentsOf: u) }      // background queue; small files
+        guard let zip = fetch(r.zip), let sigText = fetch(r.sig).flatMap({ String(data: $0, encoding: .utf8) }),
+              let sig = Data(base64Encoded: sigText.trimmingCharacters(in: .whitespacesAndNewlines)) else { return .failure(Failure(errorDescription: "Download failed")) }
+        guard let keyData = Data(base64Encoded: publicKey), let key = try? Curve25519.Signing.PublicKey(rawRepresentation: keyData),
+              key.isValidSignature(sig, for: zip) else { return .failure(Failure(errorDescription: "Update signature didn’t match; not installed")) }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("RedLightUpdate-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let zipURL = dir.appendingPathComponent("Red-Light.zip")
+        guard (try? zip.write(to: zipURL)) != nil, runStatus("/usr/bin/ditto", ["-x", "-k", zipURL.path, dir.path]).ok else { return .failure(Failure(errorDescription: "Couldn’t unpack the update")) }
+        let app = dir.appendingPathComponent("Red Light.app")
+        guard let info = Bundle(url: app)?.infoDictionary, info["CFBundleIdentifier"] as? String == Bundle.main.bundleIdentifier,
+              let v = info["CFBundleShortVersionString"] as? String, newer(v, than: current) else { return .failure(Failure(errorDescription: "The update wasn’t a newer Red Light")) }
+        _ = runStatus("/usr/bin/xattr", ["-dr", "com.apple.quarantine", app.path])
+        return .success(app)
+    }
+    /// Swap the bundle in place (one rename), then start the new copy once this one has gone.
+    private static func replaceAndRelaunch(with new: URL) {
+        let dest = Bundle.main.bundleURL
+        do { _ = try FileManager.default.replaceItemAt(dest, withItemAt: new) } catch { NSLog("update: \(error)"); return }
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "while /bin/kill -0 \(pid) 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"\(dest.path)\""]
+        try? p.run()
+        NSApp.terminate(nil)
+    }
+}
+
 // MARK: - Model
 final class Model: ObservableObject {
     @Published var config = Config(latitude: 34.05, longitude: -118.24, locationSource: nil, fadeMinutes: 30, night: Settings(), dayDefaults: Settings(), learning: Learning(), shortcuts: Shortcuts())
@@ -430,6 +604,7 @@ final class Model: ObservableObject {
     let gamma = Gamma()
     let locator = Locator()
     lazy var trueColor = TrueColorWatcher(model: self)
+    let updater = Updater()
     let liveQueue = DispatchQueue(label: "redlight.live")
     private var source: DispatchSourceFileSystemObject?
     private var monitor: Any?
@@ -444,6 +619,7 @@ final class Model: ObservableObject {
         // windows keep off the display themselves (isSnapshotRun); here: no hotkeys, no engine commands, no location
         // prompt, and no true-colour watching that could send `hold`.
         guard !snapshotMode else { refresh(); return }
+        Setup.ensure()
         ensureAgent()
         refresh()
         watchFolder()
@@ -451,6 +627,7 @@ final class Model: ObservableObject {
             guard let self = self else { return }
             if self.source == nil { self.watchFolder() }       // the folder was missing last time: try again
             self.refresh()
+            self.updater.tick(screenIsPlain: self.isOff || !self.isTinting)
         }
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.gamma.verify() }
         registerHotkeys()
@@ -471,6 +648,9 @@ final class Model: ObservableObject {
         locator.onDenied = { [weak self] in self?.locationDenied = true }
         locateIfAuto()
         _ = trueColor
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
+            guard let self = self else { return }
+            self.updater.tick(screenIsPlain: self.isOff || !self.isTinting) }
     }
     var plistPath: String { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(agentLabel).plist").path }
     /// The agent is always loaded now. Builds before this one expressed "off" by unloading it, so an unloaded
@@ -1054,6 +1234,28 @@ struct Panel: View {
     func commitSave() { let n = newName.trimmingCharacters(in: .whitespaces); guard !n.isEmpty else { return }; m.saveCurrentAsPreset(n, icon: "star.fill"); saving = false }
 }
 
+/// Version, automatic updates, and a manual install when one is waiting (a Control Center row with a trailing value).
+struct UpdatesSection: View {
+    @ObservedObject var u: Updater; var drawn = false
+    var body: some View {
+        VStack(spacing: 0) {
+            Header(text: "Updates")
+            ToggleRow(label: "Update Automatically", isOn: Binding(get: { u.automatic }, set: { u.automatic = $0 }), drawn: drawn)
+            if let r = u.available {
+                HStack { Text("Install Version \(r.version)").font(CC.row).foregroundStyle(CC.label); Spacer()
+                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(CC.secondary) }
+                    .frame(height: 33).contentShape(Rectangle()).onTapGesture { u.install() }
+            } else {
+                HStack { Text("Check for Updates").font(CC.row).foregroundStyle(CC.label); Spacer() }
+                    .frame(height: 33).contentShape(Rectangle()).onTapGesture { u.check(userInitiated: true) }
+            }
+            TextRow(text: u.status.isEmpty ? "Version \(Updater.current)" + (u.automatic && u.available != nil ? " · installs when the screen isn’t red" : "")
+                                           : "Version \(Updater.current) · \(u.status)", secondary: true)
+            SectionEnd()
+        }
+    }
+}
+
 // MARK: - Settings page
 struct SettingsPage: View {
     @ObservedObject var m: Model
@@ -1124,6 +1326,8 @@ struct SettingsPage: View {
             shortcutRow("Shade Lighter", "shadeDown", (m.config.shortcuts ?? Shortcuts()).shadeDown)
             if m.recording != nil { TextRow(text: "Press a key combination. Esc cancels.", secondary: true) }
             SectionEnd()
+
+            UpdatesSection(u: m.updater, drawn: m.snapshotMode)
 
             Header(text: "General")
             ToggleRow(label: "Open at Login", isOn: Binding(get: { m.launchAtLogin }, set: { m.setLaunchAtLogin($0) }), drawn: m.snapshotMode)

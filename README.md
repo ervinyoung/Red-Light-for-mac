@@ -27,15 +27,24 @@ Controlled human studies, each linked to its paper:
 Red Light for Mac is not a medical device and makes no medical claims.
 
 ## Install
-Apple silicon Mac, macOS 26 or later, Xcode Command Line Tools (`xcode-select --install`).
+**[Download Red Light](https://github.com/ervinyoung/Red-Light-for-mac/releases/latest/download/Red-Light.dmg)** (Apple silicon, macOS 26 or later), open it, and drag Red Light to Applications.
+
+The first time you open it, macOS asks you to confirm: System Settings › Privacy & Security › **Open Anyway**
+(the app isn't notarized). After that it sets itself up — the sunrise/sunset scheduler, your location for sun
+times, default presets — and keeps itself up to date: it checks GitHub once a day, installs only updates signed
+with the project's key, and only while no red is on screen. Settings › Updates turns that off.
+
+To remove it: switch Red Light off, quit it, and drag it to the Trash; `./uninstall.sh` also removes the scheduler
+and its files (`--all` deletes your settings too).
+
+### From source
+Xcode Command Line Tools (`xcode-select --install`), then:
 
     git clone https://github.com/ervinyoung/Red-Light-for-mac && cd Red-Light-for-mac && ./install.sh
 
-The installer builds the engine and the menu bar app from source, seeds a config, and starts the sunrise/sunset agent.
-Everything then lives in `~/Library/Application Support/RedLight`; the menu bar app is `/Applications/Red Light.app`.
-A prebuilt, ad-hoc-signed build is on the Releases page (right-click › Open the first time).
 Run `./install.sh` again to update; your settings, what it has learned and the switch are kept.
-`./uninstall.sh` removes the app, the engine and the agent but keeps your settings; `./uninstall.sh --all` deletes them too.
+`./release.sh` builds the disk image, the update zip and its signature into `dist/`; `--publish` uploads them
+as a GitHub release (signing needs the update key in your login Keychain).
 
 ## Terminal
 Make a shortcut once:
