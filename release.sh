@@ -15,10 +15,18 @@ if [ "$1" = "--publish" ]; then
   # Signed out, `gh release view` fails too, and would pass for "no such release" until the upload fails at the end.
   gh auth status >/dev/null 2>&1 || { echo "gh isn't signed in to GitHub (gh auth login)"; exit 1; }
   if gh release view "$TAG" >/dev/null 2>&1; then echo "$TAG already exists; bump CFBundleShortVersionString in app/Info.plist"; exit 1; fi
+  # The tag is made on GitHub from a commit: without this it would be the remote's latest, not what was just built.
+  [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "uncommitted changes: commit them, so $TAG is the code that was built"; exit 1; }
+  [ -n "$(git branch -r --contains HEAD)" ] || { echo "HEAD isn't pushed: git push, so $TAG is the code that was built"; exit 1; }
 fi
 rm -rf dist; mkdir dist
 echo "→ building Red Light $V"
 ./app/build.sh "$PWD/dist/Red Light.app"
+# The updater only installs a build signed by the same team as the running copy (it keeps the Location grant), so a
+# release signed by another team, or ad hoc on a Mac without the certificate, is refused by every copy in the field.
+TEAM="$(codesign -dv "dist/Red Light.app" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+case "$TEAM" in ""|"not set") echo "warning: this build is ad-hoc signed (no team): copies signed by a team will refuse it as an update" ;;
+                *) echo "signed by team $TEAM" ;; esac
 echo "→ packaging"
 ditto -c -k --keepParent "dist/Red Light.app" dist/Red-Light.zip
 # Signed only with a key the app accepts: its built-in public key is passed along and checked against the Keychain's.
@@ -39,7 +47,7 @@ fi
 ls -lh dist
 if [ "$1" = "--publish" ]; then
   echo "→ publishing $TAG"
-  gh release create "$TAG" dist/Red-Light.dmg dist/Red-Light.zip dist/Red-Light.zip.sig --title "Red Light $V" --notes-file - <<NOTES
+  gh release create "$TAG" --target "$(git rev-parse HEAD)" dist/Red-Light.dmg dist/Red-Light.zip dist/Red-Light.zip.sig --title "Red Light $V" --notes-file - <<NOTES
 **Download [Red-Light.dmg](https://github.com/ervinyoung/Red-Light-for-mac/releases/download/$TAG/Red-Light.dmg)**, open it, and drag Red Light to Applications. Apple silicon, macOS 26 or later.
 
 The first time you open it, macOS asks you to confirm: **System Settings › Privacy & Security › Open Anyway**. After that, Red Light sets itself up and keeps itself up to date.
