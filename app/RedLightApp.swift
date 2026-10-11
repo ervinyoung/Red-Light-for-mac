@@ -304,6 +304,7 @@ final class TrueColorWatcher {
     private var lastFront: String?             // the last app in front other than this one (opening the pane activates us)
     private var releaseWork: DispatchWorkItem?
     private var askedNight: Date?              // the evening askedTonight belongs to
+    private var promptFor: String?             // the app the card on screen is asking about
     private let prompt = TrueColorPrompt()
     init(model: Model) {
         m = model
@@ -367,6 +368,9 @@ final class TrueColorWatcher {
             return
         }
         releaseWork?.cancel()
+        // Straight from one colour app to another inside the card's 20 s: the card is about the app you left, and
+        // answering it would do nothing (the hold needs its app in front). Take it down and ask about this one.
+        if prompt.isShowing, promptFor != id { prompt.hide() }
         let name = app.localizedName ?? "This app"
         guard m.enabled, !m.isPaused, m.isTinting || m.heldFor != nil, declinedHere != id else { return }
         let p = policy
@@ -375,7 +379,7 @@ final class TrueColorWatcher {
         if m.heldFor != nil { if m.heldFor != name { m.hold(name) }; return }
         if p.always.contains(id) { m.hold(name); return }
         guard p.ask, !askedTonight.contains(id), !prompt.isShowing else { return }
-        askedTonight.insert(id)
+        askedTonight.insert(id); promptFor = id
         prompt.show(name: name, icon: app.icon ?? NSWorkspace.shared.icon(forFile: app.bundleURL?.path ?? "")) { [weak self] trueColor, rememberIt in
             guard let self = self else { return }
             if rememberIt { self.remember(id, always: trueColor) }
