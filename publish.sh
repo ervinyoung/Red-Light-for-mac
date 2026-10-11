@@ -14,7 +14,7 @@ echo "→ publishing as $LOGIN"
 if [ "$LOGIN" != "ervinyoung" ]; then
   # the page and README were written for ervinyoung; point them at the real account
   sed -i '' "s#ervinyoung.github.io#$LOGIN.github.io#g; s#github.com/ervinyoung#github.com/$LOGIN#g" docs/index.html README.md
-  git add -A && git commit -q -m "Point links at $LOGIN" || true
+  git add docs/index.html README.md && git commit -q -m "Point links at $LOGIN" -- docs/index.html README.md || true
   echo "note: the app's updater (Updater.feed and publicKey in app/RedLightApp.swift) still follows ervinyoung's releases"
 fi
 if ! gh repo view "$LOGIN/Red-Light-for-mac" >/dev/null 2>&1; then
