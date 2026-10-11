@@ -10,11 +10,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ervinyoung/Red-Light-for-mac/releases/latest/download/Red-Light.dmg"><img src="https://img.shields.io/badge/Download_for_Mac-ff1a0f?style=for-the-badge&logo=apple&logoColor=white" alt="Download for Mac" height="36"></a>
+  <a href="https://github.com/ervinyoung/Red-Light-for-mac/releases/latest/download/Red-Light.dmg"><img src="docs/img/btn-download.png" width="212" height="44" alt="Download for Mac"></a>
   &nbsp;
   <a href="https://ervinyoung.github.io/Red-Light-for-mac/"><picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/Visit_the_website-ffffff?style=for-the-badge&logo=safari&logoColor=ff1a0f">
-    <img src="https://img.shields.io/badge/Visit_the_website-111111?style=for-the-badge&logo=safari&logoColor=ff1a0f" alt="Visit the Red Light website" height="36">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/img/btn-site-dark.png" width="196" height="44">
+    <img src="docs/img/btn-site-light.png" width="196" height="44" alt="Visit the website">
   </picture></a>
 </p>
 <p align="center">
