@@ -1128,6 +1128,10 @@ enum CC {
     static let sep       = Color(nsColor: .separatorColor)
     static let circle    = Color(nsColor: .quaternaryLabelColor)
     static let symbol    = Color(nsColor: .secondaryLabelColor)
+    // Only for documentation renders, where AppKit draws inactive controls without their glass or fill:
+    // the active accent and the empty track, sampled from the running app on macOS 27 (dark).
+    static let accentDrawn = Color(red: 57 / 255, green: 124 / 255, blue: 248 / 255)
+    static let trackDrawn  = Color(red: 52 / 255, green: 52 / 255, blue: 52 / 255)
 }
 struct Step: Identifiable { let label: String; let value: Double?; var id: String { label } }
 // Denser above the 60 % knee, where blue is already gone and each step is a different feel of red.
@@ -1233,6 +1237,20 @@ struct GlassSlider: View {
             }
         }
     }
+    /// The slider as it looks active on screen (a 6 pt track, the accent fill up to the knob, a 20 x 16 pt knob),
+    /// drawn into the real control's frame for documentation renders only.
+    private func drawnSlider(_ v: Double) -> some View {
+        GeometryReader { geo in
+            let knob = CGSize(width: 20, height: 16), span = max(1, geo.size.width - knob.width)
+            let x = knob.width / 2 + span * CGFloat(v / Double(max(1, steps.count - 1))), mid = geo.size.height / 2
+            ZStack(alignment: .topLeading) {
+                Capsule().fill(CC.trackDrawn).frame(width: geo.size.width, height: 6).position(x: geo.size.width / 2, y: mid)
+                Capsule().fill(CC.accentDrawn).frame(width: x, height: 6).position(x: x / 2, y: mid)
+                Capsule().fill(.white).frame(width: knob.width, height: knob.height)
+                    .shadow(color: .black.opacity(0.22), radius: 1, y: 0.5).position(x: x, y: mid)
+            }
+        }
+    }
     var body: some View {
         let position = Binding<Double>(
             get: { dragIdx ?? truePosition },
@@ -1249,6 +1267,8 @@ struct GlassSlider: View {
             Image(systemName: minIcon).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 18)
             Slider(value: position, in: 0...Double(max(1, steps.count - 1))) { editing in if !editing { finish() } }
                 .controlSize(.regular)      // Control Center's knob is 20 pt; .large draws 24
+                .opacity(isSnapshotRun ? 0 : 1)
+                .overlay { if isSnapshotRun { drawnSlider(position.wrappedValue) } }
                 .overlay(alignment: .bottom) { tickMarks }
             Image(systemName: maxIcon).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 18)
         }
@@ -1283,10 +1303,12 @@ struct SwitchView: View {
     let isOn: Binding<Bool>; var small = false; var drawn = false
     var body: some View {
         if drawn {
-            let w: CGFloat = small ? 32 : 38, h: CGFloat = small ? 18 : 22
+            // Measured from the running switch on macOS 27 at 2x: a 54 x 24 pt track and a 32 x 20 pt capsule knob
+            // inset 2 pt (the Liquid Glass switch's knob is a pill, not a circle). Small scales by the system's 0.8.
+            let k: CGFloat = small ? 0.8 : 1, w = 54 * k, h = 24 * k, kw = 32 * k, kh = 20 * k
             ZStack(alignment: isOn.wrappedValue ? .trailing : .leading) {
-                Capsule().fill(isOn.wrappedValue ? Color.accentColor : Color.primary.opacity(0.18)).frame(width: w, height: h)
-                Circle().fill(.white).frame(width: h - 4, height: h - 4).shadow(color: .black.opacity(0.25), radius: 1, y: 1).padding(2)
+                Capsule().fill(isOn.wrappedValue ? CC.accentDrawn : CC.trackDrawn).frame(width: w, height: h)
+                Capsule().fill(.white).frame(width: kw, height: kh).shadow(color: .black.opacity(0.22), radius: 1, y: 0.5).padding(2 * k)
             }
         } else if small {
             Toggle("", isOn: isOn).toggleStyle(.switch).labelsHidden().controlSize(.small)
