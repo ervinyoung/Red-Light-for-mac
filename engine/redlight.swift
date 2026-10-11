@@ -48,6 +48,13 @@ struct Settings: Codable {
 /// Rendered by the menu bar app. `gammaBlue`/`gammaGreen` are channel multipliers derived from `warmth`.
 struct Shade: Codable { var enabled: Bool = false; var level: Double = 0.3; var warmth: Double? = 0; var gammaBlue: Double? = 1; var gammaGreen: Double? = 1 }
 struct Commanded: Codable { var keyboardBrightness: Double? }
+/// macOS's lowest keyboard level is 0.001, which drives the backlight's PWM at 54 of 960 ticks; every value up to about
+/// 0.008 is that same level. The hardware goes down to 1 tick, and the menu bar app holds it there: a value between 0
+/// and 0.001 means "this fraction of macOS's minimum", so the four extra-dim levels, 2, 4, 9 and 21 ticks, are
+/// 2/54 … 21/54 of 0.001. The engine records them; the app drives the hardware.
+let kbFloor = 0.001
+func isExtraDim(_ v: Double?) -> Bool { guard let v = v else { return false }; return v > 0 && v < kbFloor }
+let extraDimLevels = [2.0, 4, 9, 21].map { $0 / 54 * kbFloor }
 func loadCommanded() -> Commanded { (try? Data(contentsOf: cmdURL)).flatMap { try? JSONDecoder().decode(Commanded.self, from: $0) } ?? Commanded() }
 func saveCommanded(_ c: Commanded) { let e = JSONEncoder(); e.outputFormatting = [.prettyPrinted, .sortedKeys]; try? e.encode(c).write(to: cmdURL, options: .atomic) }
 func loadShade() -> Shade { (try? Data(contentsOf: shadeURL)).flatMap { try? JSONDecoder().decode(Shade.self, from: $0) } ?? Shade() }
@@ -195,9 +202,13 @@ func readCurrent() -> Settings {
         s.keyboardIdleDimSeconds = kbGetDouble("idleDimTimeForKeyboard:", id)
         if !dimmed && s.keyboardAutoBrightness == false {
             let v = Double(kbGetFloat("brightnessForKeyboard:", id))
-            s.keyboardBrightness = v
             let known = loadCommanded().keyboardBrightness
-            if known == nil || abs(known! - v) > 0.0005 { saveCommanded(Commanded(keyboardBrightness: v)) }
+            // While the app holds an extra-dim level, the system reads 0 or its minimum: that is the hold, not a change.
+            if isExtraDim(known) && v <= kbFloor + 0.0001 { s.keyboardBrightness = known }
+            else {
+                s.keyboardBrightness = v
+                if known == nil || abs(known! - v) > 0.0005 { saveCommanded(Commanded(keyboardBrightness: v)) }
+            }
         } else if s.keyboardAutoBrightness == false {
             s.keyboardBrightness = loadCommanded().keyboardBrightness
         }
@@ -232,7 +243,7 @@ func apply(_ s: Settings, label: String, quiet: Bool = false) {
     for id in kbIDs() {
         if let d = s.keyboardIdleDimSeconds { kbSetIdleDim(d, id) }
         if let a = s.keyboardAutoBrightness { kbSetAuto(a, id) }
-        if let b = s.keyboardBrightness { kbSetBrightness(Float(b), id); saveCommanded(Commanded(keyboardBrightness: b)) }
+        if let b = s.keyboardBrightness { if !isExtraDim(b) { kbSetBrightness(Float(b), id) }; saveCommanded(Commanded(keyboardBrightness: b)) }
     }
     if !quiet { log("applied \(label): \(describe(s))") }
 }
@@ -241,7 +252,7 @@ func describe(_ s: Settings) -> String {
     if let v = s.warmth { p.append(String(format: "warmth=%.2f", v)) }
     if let v = s.filterEnabled { p.append("filter=\(v ? "on" : "off")") }
     if let v = s.intensity { p.append(String(format: "tint=%.2f", v)) }
-    if let v = s.keyboardBrightness { p.append(String(format: "kbBrightness=%.4f", v)) }
+    if let v = s.keyboardBrightness { p.append(String(format: "kbBrightness=%.6f", v)) }
     if let v = s.keyboardIdleDimSeconds { p.append("kbIdleDim=\(Int(v))s") }
     if let v = s.keyboardAutoBrightness { p.append("kbAuto=\(v)") }
     if let v = s.shadeEnabled { p.append("shade=\(v ? "on" : "off")") }
@@ -258,7 +269,7 @@ func blend(_ from: Settings, _ to: Settings, _ t: Double) -> Settings {
     if let a = from.warmth, let b = to.warmth { s.warmth = lerp(a, b, t) }
     if let b = to.keyboardBrightness {
         let a = from.keyboardBrightness ?? b
-        if a > 0.0005 && b > 0.0005 { s.keyboardBrightness = exp(lerp(log(a), log(b), t)) } else { s.keyboardBrightness = lerp(a, b, t) }
+        if a > 0 && b > 0 { s.keyboardBrightness = exp(lerp(log(a), log(b), t)) } else { s.keyboardBrightness = lerp(a, b, t) }   // through the extra-dim levels too
     }
     if let b = to.shadeLevel, to.shadeEnabled == true {
         let a = (from.shadeEnabled == true ? from.shadeLevel : 0) ?? 0
@@ -798,8 +809,9 @@ case "set":
     guard CommandLine.arguments.count > 3 else { print("usage: redlight set warmth|keyboard|idle|shade|tint <value|off>"); exit(2) }
     let field = CommandLine.arguments[2], raw = CommandLine.arguments[3]
     let off = (raw == "off")
-    guard off || Double(raw) != nil else { print("'\(raw)' is not a number or 'off'"); exit(2) }
-    let num = Double(raw) ?? 0
+    let dim = field == "keyboard" ? ["dim1", "dim2", "dim3", "dim4"].firstIndex(of: raw.lowercased()) : nil
+    guard off || dim != nil || Double(raw) != nil else { print("'\(raw)' is not a number or 'off'"); exit(2) }
+    let num = dim.map { extraDimLevels[$0] * 100 } ?? Double(raw) ?? 0
     refuseIfOff(); honourHold()
     var s = Settings()
     switch field {

@@ -4,6 +4,7 @@ import Carbon
 import CoreLocation
 import ServiceManagement
 import CryptoKit
+import IOKit
 
 // MARK: - Shared files (same as the redlight CLI)
 let appDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/RedLight")
@@ -574,7 +575,7 @@ enum Setup {
           "presets": [
             { "name": "Dusk",       "icon": "sunset.fill",   "settings": { "warmth": 0.6, "keyboardBrightness": 0.01,  "keyboardIdleDimSeconds": 30, "shadeEnabled": false, "shadeLevel": 0.2 } },
             { "name": "Night",      "icon": "moon.fill",     "settings": { "warmth": 0.8, "keyboardBrightness": 0.003, "keyboardIdleDimSeconds": 5,  "shadeEnabled": false, "shadeLevel": 0.2 } },
-            { "name": "Deep night", "icon": "moon.zzz.fill", "settings": { "warmth": 1.0, "keyboardBrightness": 0.001, "keyboardIdleDimSeconds": 5,  "shadeEnabled": true,  "shadeLevel": 0.4 } },
+            { "name": "Deep night", "icon": "moon.zzz.fill", "settings": { "warmth": 1.0, "keyboardBrightness": 0.000074, "keyboardIdleDimSeconds": 5,  "shadeEnabled": true,  "shadeLevel": 0.4 } },
             { "name": "Movie",      "icon": "film.fill",     "settings": { "warmth": 0.6, "keyboardBrightness": 0.0,   "keyboardIdleDimSeconds": 5,  "shadeEnabled": true,  "shadeLevel": 0.4 } }
           ],
           "shortcuts": {
@@ -747,6 +748,144 @@ final class Updater: ObservableObject {
     }
 }
 
+// MARK: - Keyboard backlight, including below macOS's minimum
+/// The backlight is a PWM with a 960-tick period. macOS's levels run from 54 ticks (its minimum, every value up to
+/// about 0.008) to 336 (full), but the hardware goes down to 1: macOS only passes through those levels while it fades.
+/// The four extra-dim levels are 2, 4, 9 and 21 ticks; the engine stores them as that fraction of macOS's 0.001.
+let kbMinTicks = 54.0, kbMaxTicks = 336.0
+let kbDimTicks: [Double] = [2, 4, 9, 21]
+/// Ticks for a stored value, measured on this hardware: 0.01 → 55, 0.1 → 80, 0.5 → 194, 1 → 336.
+func kbTicks(_ v: Double?) -> Double {
+    guard let v = v, v > 0 else { return 0 }
+    return v < 0.001 ? v / 0.001 * kbMinTicks : max(kbMinTicks, 51.5 + 284.5 * v)
+}
+func kbValue(_ ticks: Double) -> Double {
+    if ticks <= 0 { return 0 }
+    if ticks < kbMinTicks { return ticks / kbMinTicks * 0.001 }
+    return ticks < kbMinTicks + 1 ? 0.001 : min(1, (ticks - 51.5) / 284.5)
+}
+/// Percent of the backlight's full output: honest about how much light each level gives.
+func fmtKeyboard(_ v: Double?) -> String {
+    let t = kbTicks(v); guard t > 0 else { return "Off" }
+    let p = t / kbMaxTicks * 100
+    return p < 10 ? String(format: "%.1f%%", p) : "\(Int(p.rounded()))%"
+}
+
+/// Holds the backlight at an extra-dim level. macOS restarts a fade from wherever the light is, and drops a request
+/// whose target equals the running one; so a slow fade toward off, re-aimed and restarted every half second, long
+/// before it can move a tick, keeps the light where it is, and a quick fade up corrects the occasional slip.
+/// macOS ignores requests once it has idle-dimmed the keys, so while holding, its idle-dimming is suspended and
+/// this does the idle-off itself, as macOS does, from the last keypress: it fades the keys out after the idle time,
+/// and back in from off at the next key.
+final class KeyboardHold {
+    private typealias SetFn = @convention(c) (AnyObject, Selector, Float, Int32, Bool, UInt64) -> Bool
+    private typealias GetFn = @convention(c) (AnyObject, Selector, UInt64) -> Float
+    private typealias SuspendFn = @convention(c) (AnyObject, Selector, Bool, UInt64) -> Bool
+    private let q = DispatchQueue(label: "redlight.keyboard")
+    private var timer: DispatchSourceTimer?
+    private var client: NSObject?, id: UInt64 = 0
+    private var setFn: SetFn?, getFn: GetFn?, suspendFn: SuspendFn?
+    private let suspendSel = NSSelectorFromString("suspendIdleDimming:forKeyboard:")
+    private var suspended = false
+    private let setSel = NSSelectorFromString("setBrightness:fadeSpeed:commit:forKeyboard:"), getSel = NSSelectorFromString("brightnessForKeyboard:")
+    private var backlight: io_service_t = 0
+    // q only
+    private var target: Int?, idle = 5.0, asleep = false, lit = true
+    private var up = false, fastDown = false, lastKeep = Date.distantPast, lastCheck = Date.distantPast
+    private var lastTick = -1, lastMove = Date.distantPast       // a requested fade that isn't moving gets asked again
+    private var baseline: Double? = nil         // what macOS reported when this hold began: its old level, not a change
+    /// Someone moved the backlight with the keyboard keys or Control Center: hand it back, with the new value.
+    var onOverride: ((Double) -> Void)?
+    init() {
+        guard !isSnapshotRun else { return }
+        _ = dlopen("/System/Library/PrivateFrameworks/CoreBrightness.framework/CoreBrightness", RTLD_NOW)
+        guard let cls = NSClassFromString("KeyboardBrightnessClient") as? NSObject.Type else { return }
+        let c = cls.init(); client = c
+        id = ((c.perform(NSSelectorFromString("copyKeyboardBacklightIDs"))?.takeUnretainedValue() as? [NSNumber])?.first?.uint64Value) ?? 0
+        if c.responds(to: setSel) { setFn = unsafeBitCast(c.method(for: setSel), to: SetFn.self) }
+        if c.responds(to: getSel) { getFn = unsafeBitCast(c.method(for: getSel), to: GetFn.self) }
+        if c.responds(to: suspendSel) { suspendFn = unsafeBitCast(c.method(for: suspendSel), to: SuspendFn.self) }
+        backlight = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceNameMatching("kbd-backlight"))
+        let nc = NSWorkspace.shared.notificationCenter
+        for n in [NSWorkspace.screensDidSleepNotification, NSWorkspace.willSleepNotification] {
+            nc.addObserver(forName: n, object: nil, queue: nil) { [weak self] _ in self?.q.async { self?.asleep = true; self?.schedule() } } }
+        for n in [NSWorkspace.screensDidWakeNotification, NSWorkspace.didWakeNotification] {
+            nc.addObserver(forName: n, object: nil, queue: nil) { [weak self] _ in self?.q.async { self?.asleep = false; self?.lit = false; self?.schedule() } } }
+    }
+    /// `target` in ticks (1–53) holds; nil hands the backlight back to macOS at `restore`.
+    func update(target t: Int?, idleSeconds: Double, restore: Double?) {
+        q.async { [self] in
+            let was = target
+            target = t; idle = idleSeconds
+            if t != was { up = false; fastDown = false; lastKeep = .distantPast; baseline = nil }
+            // Hand the keys back at macOS's level, or off: a plain "off" from the engine would be dropped by macOS
+            // as a repeat of the fade toward off that the hold left running.
+            if t == nil, was != nil, let r = restore, r == 0 || r >= 0.001 { send(Float(r), 250) }
+            schedule()
+        }
+    }
+    /// Live preview while dragging in macOS's own range.
+    func preview(_ v: Double) { q.async { [self] in if target == nil { send(Float(v), 0) } } }
+    private var lastValue: Float = -1
+    /// macOS drops a request whose target equals the fade already running: re-aim it for an instant first.
+    private func send(_ v: Float, _ ms: Int32) {
+        guard let f = setFn, let c = client else { return }
+        if v == lastValue { _ = f(c, setSel, v == 0 ? 0.001 : 0, 60000, false, id) }
+        _ = f(c, setSel, v, ms, false, id); lastValue = v
+    }
+    private func reg(_ key: String) -> NSNumber? { IORegistryEntryCreateCFProperty(backlight, key as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber }
+    private func tick() -> Int { (reg("enabled")?.boolValue ?? false) ? (reg("high-period")?.intValue ?? 0) : 0 }
+    /// Seconds since the last keypress. macOS's own keyboard idle-off counts typing only (scrolling or moving the
+    /// pointer leaves the keys dark), so this does the same.
+    private func idleTime() -> Double {
+        min(CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown),
+            CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .flagsChanged))
+    }
+    private func schedule() {
+        // macOS ignores brightness requests once it has idle-dimmed the keys, so while holding, its idle-dimming is
+        // suspended and this does idle-off itself; leaving the extra-dim range hands idle-dimming straight back.
+        let holding = target != nil && setFn != nil && backlight != 0
+        if holding != suspended, let f = suspendFn, let c = client { _ = f(c, suspendSel, holding, id); suspended = holding }
+        let run = holding && !asleep
+        if !run { timer?.cancel(); timer = nil; return }
+        let interval: DispatchTimeInterval = lit ? .milliseconds(15) : .milliseconds(100)
+        if timer == nil { let t = DispatchSource.makeTimerSource(queue: q); t.setEventHandler { [weak self] in self?.step() }; timer = t; t.resume() }
+        timer?.schedule(deadline: .now(), repeating: interval, leeway: .milliseconds(5))
+    }
+    private func step() {
+        guard let T = target else { return }
+        let now = Date()
+        if !lit {                                                       // keys off after inactivity: wait for a touch
+            if idleTime() < 0.5 { lit = true; up = false; fastDown = false; schedule() }
+            else if tick() > 0 && now.timeIntervalSince(lastMove) > 0.6 { send(0, 500); lastMove = now }   // macOS lit them meanwhile
+            return
+        }
+        if idle > 0 && idleTime() >= idle { send(0, 500); lit = false; lastMove = now; schedule(); return }
+        if now.timeIntervalSince(lastCheck) > 0.25, let g = getFn, let c = client {
+            lastCheck = now
+            let v = Double(g(c, getSel, id))
+            // Only ever 0 or the minimum come from here; another value that appears after the hold began is the
+            // brightness keys or Control Center.
+            if baseline == nil { baseline = v }
+            else if v > 0.0015, abs(v - baseline!) > 0.0005 {
+                send(Float(v), 250)                     // let go at the new level, not wherever our last fade was heading
+                target = nil; schedule(); let cb = onOverride; DispatchQueue.main.async { cb?(v) }; return }
+            else if v <= 0.0015 { baseline = v }
+        }
+        let t = tick()
+        if t != lastTick { lastTick = t; lastMove = now }
+        // macOS's own fades (waking the keys, say) swallow ours: a fade we asked for that hasn't moved is asked again.
+        let stalled = now.timeIntervalSince(lastMove) > 0.4
+        // Turning a fade around costs a step on the way up, so ride an upward fade one past the target and turn there.
+        if up { if t >= T + 1 { send(0, 900); up = false; fastDown = true; lastMove = now } else if stalled { send(0.001, 900); lastMove = now }; return }
+        if t < T { send(0.001, 900); up = true; fastDown = false; lastMove = now; return }  // in from off, or a slip
+        if t > T { if !fastDown || stalled { send(0, 900); fastDown = true; lastMove = now }; return }   // down from macOS's levels
+        if fastDown || now.timeIntervalSince(lastKeep) > 0.5 {
+            send(0, 60000); fastDown = false; lastKeep = now      // restarts the slow fade before it can move a tick
+        }
+    }
+}
+
 // MARK: - Model
 final class Model: ObservableObject {
     @Published var config = Config(latitude: 34.05, longitude: -118.24, locationSource: nil, fadeMinutes: 30, night: Settings(), dayDefaults: Settings(), learning: Learning(), shortcuts: Shortcuts())
@@ -770,6 +909,7 @@ final class Model: ObservableObject {
     let gamma = Gamma()
     let locator = Locator()
     lazy var trueColor = TrueColorWatcher(model: self)
+    let keyboardHold = KeyboardHold()
     let updater = Updater()
     let liveQueue = DispatchQueue(label: "redlight.live")
     private var source: DispatchSourceFileSystemObject?
@@ -790,6 +930,7 @@ final class Model: ObservableObject {
         Setup.ensure()
         DispatchQueue.main.async { Setup.offerMoveToApplications() }     // after launch, not inside the scene's setup
         ensureAgent()
+        keyboardHold.onOverride = { [weak self] v in self?.set("keyboard", String(format: "%.6f", v * 100)) }
         refresh()
         watchFolder()
         Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
@@ -1082,11 +1223,28 @@ final class Model: ObservableObject {
         }
         if let v = l.keyboardBrightness { lastKeyboard = v } else { l.keyboardBrightness = lastKeyboard ?? live.keyboardBrightness }
         live = l
+        syncKeyboardHold()
         if ProcessInfo.processInfo.environment["MIDNIGHT_DEBUG"] != nil {
             let line = "\(Date()) live warmth=\(l.warmth ?? -1) kb=\(l.keyboardBrightness ?? -1) idle=\(l.keyboardIdleDimSeconds ?? -1) shade=\(shade.enabled)/\(shade.level) | status: \(line)\n"
             if let h = try? FileHandle(forWritingTo: appDir.appendingPathComponent("debug-live.log")) { h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); h.closeFile() }
             else { try? line.write(to: appDir.appendingPathComponent("debug-live.log"), atomically: true, encoding: .utf8) }
         }
+    }
+    /// An extra-dim level is held by the app; anything else belongs to macOS. Off-switch and day looks never hold.
+    func syncKeyboardHold() {
+        guard !snapshotMode else { return }
+        let v = live.keyboardBrightness ?? 0
+        let hold = v > 0 && v < 0.001 && !isOff ? Int(kbTicks(v).rounded()) : nil
+        keyboardHold.update(target: hold, idleSeconds: live.keyboardIdleDimSeconds ?? 5, restore: v)
+    }
+    /// The keyboard slider: extra-dim levels take effect at once through the hold; macOS's range previews directly
+    /// while dragging and is recorded by the engine when you let go.
+    func setKeyboard(ticks: Double, final: Bool) {
+        let v = kbValue(ticks)
+        live.keyboardBrightness = v; lastKeyboard = v
+        if v > 0 && v < 0.001 { keyboardHold.update(target: Int(ticks.rounded()), idleSeconds: live.keyboardIdleDimSeconds ?? 5, restore: nil) }
+        else { keyboardHold.update(target: nil, idleSeconds: live.keyboardIdleDimSeconds ?? 5, restore: nil); keyboardHold.preview(v) }
+        if final { set("keyboard", v > 0 ? String(format: "%.6f", v * 100) : "off") }
     }
     func set(_ field: String, _ value: String, final: Bool = true) {
         switch field {
@@ -1138,7 +1296,6 @@ struct Step: Identifiable { let label: String; let value: Double?; var id: Strin
 let warmSteps  = [Step(label: "Off", value: nil), Step(label: "15%", value: 0.15), Step(label: "30%", value: 0.3), Step(label: "45%", value: 0.45),
                   Step(label: "60%", value: 0.6), Step(label: "70%", value: 0.7), Step(label: "80%", value: 0.8), Step(label: "90%", value: 0.9), Step(label: "100%", value: 1.0)]
 // 0.1 % is the practical floor: the keyboard's PWM table bottoms out just beneath it and anything lower looks the same.
-let keySteps   = [Step(label: "Off", value: nil), Step(label: "0.1%", value: 0.001), Step(label: "0.3%", value: 0.003), Step(label: "1%", value: 0.01), Step(label: "5%", value: 0.05), Step(label: "30%", value: 0.3)]
 let shadeSteps = [Step(label: "Off", value: nil), Step(label: "20%", value: 0.2), Step(label: "40%", value: 0.4), Step(label: "60%", value: 0.6), Step(label: "80%", value: 0.8)]
 let idleSteps  = [Step(label: "5 s", value: 5), Step(label: "10 s", value: 10), Step(label: "30 s", value: 30), Step(label: "1 min", value: 60), Step(label: "5 min", value: 300)]
 func fmtSeconds(_ v: Double?) -> String {
@@ -1274,6 +1431,84 @@ struct GlassSlider: View {
         }
     }
 }
+/// Keyboard Backlight: off and four extra-dim levels on the left, snapping, then all of macOS's range, continuous and
+/// perceptually even (a log scale of light output). Marks sit only where something is: each extra-dim level and the
+/// point where macOS's own minimum begins.
+struct KeyboardSlider: View {
+    let current: Double?
+    let onChange: (Double, Bool) -> Void          // ticks, final
+    static let zone = 0.30
+    static let stops: [Double] = [0, 0.06, 0.12, 0.18, 0.24, 0.30]             // off, the four levels, macOS's minimum
+    static let stopTicks: [Double] = [0] + kbDimTicks + [kbMinTicks]
+    static func position(_ t: Double) -> Double {
+        if t <= 0 { return 0 }
+        if t < kbMinTicks {
+            for k in 0..<(stopTicks.count - 1) where t <= stopTicks[k + 1] {
+                return stops[k] + (stops[k + 1] - stops[k]) * (t - stopTicks[k]) / (stopTicks[k + 1] - stopTicks[k]) }
+        }
+        return zone + (1 - zone) * (log(max(t, kbMinTicks)) - log(kbMinTicks)) / (log(kbMaxTicks) - log(kbMinTicks))
+    }
+    /// Snaps on the left; continuous past macOS's minimum.
+    static func snap(_ p: Double) -> (position: Double, ticks: Double) {
+        if p < zone + 0.02 { let i = stops.indices.min { abs(stops[$0] - p) < abs(stops[$1] - p) }!; return (stops[i], stopTicks[i]) }
+        let f = (p - zone) / (1 - zone)
+        return (p, exp(log(kbMinTicks) + f * (log(kbMaxTicks) - log(kbMinTicks))).rounded())
+    }
+    @State private var drag: Double? = nil
+    @State private var lastTicks = -1.0
+    @State private var settle: DispatchWorkItem? = nil
+    private func finish() {
+        settle?.cancel(); settle = nil
+        guard let p = drag else { return }
+        drag = nil; lastTicks = -1
+        onChange(Self.snap(p).ticks, true)
+    }
+    private var marks: some View {
+        GeometryReader { geo in
+            let knob: CGFloat = 20, span = max(1, geo.size.width - knob)
+            ForEach(1..<Self.stops.count, id: \.self) { i in
+                Capsule().fill(Color(nsColor: i == Self.stops.count - 1 ? .secondaryLabelColor : .tertiaryLabelColor))
+                    .frame(width: 2, height: i == Self.stops.count - 1 ? 6 : 4)
+                    .position(x: knob / 2 + span * CGFloat(Self.stops[i]), y: geo.size.height + (i == Self.stops.count - 1 ? 4.5 : 3.5))
+            }
+        }
+    }
+    private func drawn(_ p: Double) -> some View {
+        GeometryReader { geo in
+            let knob = CGSize(width: 20, height: 16), span = max(1, geo.size.width - knob.width)
+            let x = knob.width / 2 + span * CGFloat(p), mid = geo.size.height / 2
+            ZStack(alignment: .topLeading) {
+                Capsule().fill(CC.trackDrawn).frame(width: geo.size.width, height: 6).position(x: geo.size.width / 2, y: mid)
+                Capsule().fill(CC.accentDrawn).frame(width: x, height: 6).position(x: x / 2, y: mid)
+                Capsule().fill(.white).frame(width: knob.width, height: knob.height)
+                    .shadow(color: .black.opacity(0.22), radius: 1, y: 0.5).position(x: x, y: mid)
+            }
+        }
+    }
+    var body: some View {
+        let position = Binding<Double>(
+            get: { drag ?? Self.position(kbTicks(current)) },
+            set: { p in
+                let s = Self.snap(p)
+                drag = s.position
+                if s.ticks != lastTicks { lastTicks = s.ticks; onChange(s.ticks, false) }
+                settle?.cancel()
+                let w = DispatchWorkItem { finish() }
+                settle = w
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: w)
+            })
+        HStack(spacing: 10) {
+            Image(systemName: "light.min").font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 18)
+            Slider(value: position, in: 0...1) { editing in if !editing { finish() } }
+                .controlSize(.regular)
+                .opacity(isSnapshotRun ? 0 : 1)
+                .overlay { if isSnapshotRun { drawn(position.wrappedValue) } }
+                .overlay(alignment: .bottom) { marks }
+            Image(systemName: "light.max").font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 18)
+        }
+        .frame(height: 32)
+    }
+}
 struct SliderRow: View {
     let minIcon: String; let maxIcon: String; let steps: [Step]; let current: Double?; let isOn: Bool
     let onChange: (Step, Bool) -> Void
@@ -1393,9 +1628,8 @@ struct Panel: View {
                 if let v = s.value { m.setShade(enabled: true, level: v) } else { m.setShade(enabled: false) } }
             SectionEnd()
 
-            Header(text: "Keyboard Backlight", value: (m.live.keyboardBrightness ?? 0) > 0 ? fmtPct(m.live.keyboardBrightness) : "Off")
-            SliderRow(minIcon: "light.min", maxIcon: "light.max", steps: keySteps, current: m.live.keyboardBrightness, isOn: (m.live.keyboardBrightness ?? 0) > 0) { s, final in
-                m.set("keyboard", s.value.map { String($0 * 100) } ?? "off", final: final) }
+            Header(text: "Keyboard Backlight", value: fmtKeyboard(m.live.keyboardBrightness))
+            KeyboardSlider(current: m.live.keyboardBrightness) { t, final in m.setKeyboard(ticks: t, final: final) }
             Header(text: "Turn Off After Inactivity", value: fmtSeconds(m.live.keyboardIdleDimSeconds))
             SliderRow(minIcon: "timer", maxIcon: "clock", steps: idleSteps, current: m.live.keyboardIdleDimSeconds, isOn: true) { s, final in
                 m.set("idle", String(Int(s.value ?? 5)), final: final) }
@@ -1446,7 +1680,7 @@ struct Panel: View {
     /// applied (only warmth defaults, to 0), so a missing one matches whatever is there rather than counting as off.
     func isCurrent(_ p: Preset) -> Bool {
         let s = p.settings
-        let kbOK = s.keyboardBrightness.map { abs($0 - (m.live.keyboardBrightness ?? 0)) < 0.0015 } ?? true
+        let kbOK = s.keyboardBrightness.map { abs(kbTicks($0) - kbTicks(m.live.keyboardBrightness)) < 1 } ?? true
         let shadeOK = (s.shadeEnabled ?? m.shade.enabled) == m.shade.enabled
             && (!m.shade.enabled || s.shadeLevel.map { abs($0 - m.shade.level) < 0.02 } ?? true)
         let warmOK = abs((s.warmth ?? 0) - (m.live.warmth ?? 0)) < 0.03
