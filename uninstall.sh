@@ -32,7 +32,7 @@ if [ "$1" = "--all" ]; then
 else
   rm -rf "$DIR/gui"
   rm -f "$DIR/redlight" "$DIR/redlight.new" "$DIR/redlight.swift" "$DIR/sunmode" "$DIR/.lock" \
-        "$DIR/state.json" "$DIR/shade.json" "$DIR/commanded.json" "$DIR/launchd.out.log" "$DIR/launchd.err.log"
+        "$DIR/state.json" "$DIR/shade.json" "$DIR/commanded.json" "$DIR/keyboard-idle" "$DIR/launchd.out.log" "$DIR/launchd.err.log"
   echo "Red Light is removed. Your settings and what it learned are kept in $DIR (./uninstall.sh --all deletes them)."
 fi
 echo "If you added the redlight alias to ~/.zshrc, remove that line too."
