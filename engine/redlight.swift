@@ -194,12 +194,14 @@ func kbGetBool(_ sel: String, _ id: UInt64) -> Bool { let (imp, s) = kbImp(sel);
 @discardableResult func kbSetAuto(_ v: Bool, _ id: UInt64) -> Bool { let (imp, s) = kbImp("enableAutoBrightness:forKeyboard:"); return unsafeBitCast(imp, to: (@convention(c) (AnyObject, Selector, Bool, UInt64) -> Bool).self)(kbClient, s, v, id) }
 
 // MARK: - Read / apply
+/// The menu bar app has the keys dark for inactivity (its `keyboard-idle` marker). A marker left by an app that quit or
+/// crashed counts for nothing: only while the app runs.
+func appIdleKeys() -> Bool { FileManager.default.fileExists(atPath: appDir.appendingPathComponent("keyboard-idle").path) && runningApp() }
 func readCurrent() -> Settings {
     var s = Settings(filterEnabled: maGetEnabled(colorCategory), filterType: maGetType(colorCategory), hue: maGetHue(), intensity: maGetInten())
     if let id = kbIDs().first {
         // The menu bar app runs idle-off itself while it sets the keys, and marks it: dark keys then aren't a change.
-        let appIdle = FileManager.default.fileExists(atPath: appDir.appendingPathComponent("keyboard-idle").path)
-        let dimmed = kbGetBool("isBacklightDimmedOnKeyboard:", id) || kbGetBool("isBacklightSuppressedOnKeyboard:", id) || appIdle
+        let dimmed = kbGetBool("isBacklightDimmedOnKeyboard:", id) || kbGetBool("isBacklightSuppressedOnKeyboard:", id) || appIdleKeys()
         s.keyboardAutoBrightness = kbGetBool("isAutoBrightnessEnabledForKeyboard:", id)
         s.keyboardIdleDimSeconds = kbGetDouble("idleDimTimeForKeyboard:", id)
         if !dimmed && s.keyboardAutoBrightness == false {
@@ -246,7 +248,9 @@ func apply(_ s: Settings, label: String, quiet: Bool = false) {
     for id in kbIDs() {
         if let d = s.keyboardIdleDimSeconds { kbSetIdleDim(d, id) }
         if let a = s.keyboardAutoBrightness { kbSetAuto(a, id) }
-        if let b = s.keyboardBrightness { if !isExtraDim(b) { kbSetBrightness(Float(b), id) }; saveCommanded(Commanded(keyboardBrightness: b)) }
+        // Extra-dim levels are the app's to hold. Keys the app has turned off for inactivity stay off: it lights them at the
+        // next touch, at the level recorded here (a fade step each minute lit them for a moment).
+        if let b = s.keyboardBrightness { if !isExtraDim(b) && !(b > 0 && appIdleKeys()) { kbSetBrightness(Float(b), id) }; saveCommanded(Commanded(keyboardBrightness: b)) }
     }
     if !quiet { log("applied \(label): \(describe(s))") }
 }
