@@ -829,11 +829,28 @@ final class KeyboardHold {
         if c.responds(to: suspendSel) { suspendFn = unsafeBitCast(c.method(for: suspendSel), to: SuspendFn.self) }
         backlight = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceNameMatching("kbd-backlight"))
         markIdle(false)
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.q.sync { self?.shutdown() } }
         let nc = NSWorkspace.shared.notificationCenter
         for n in [NSWorkspace.screensDidSleepNotification, NSWorkspace.willSleepNotification] {
             nc.addObserver(forName: n, object: nil, queue: nil) { [weak self] _ in self?.q.async { self?.asleep = true; self?.schedule() } } }
         for n in [NSWorkspace.screensDidWakeNotification, NSWorkspace.didWakeNotification] {
-            nc.addObserver(forName: n, object: nil, queue: nil) { [weak self] _ in self?.q.async { self?.asleep = false; self?.lit = false; self?.schedule() } } }
+            nc.addObserver(forName: n, object: nil, queue: nil) { [weak self] _ in self?.q.async { guard let k = self else { return }
+                k.asleep = false; k.lit = false
+                switch k.want { case .level, .hold: k.markIdle(true); default: break }     // dark until a touch: say so, as for idle-off
+                k.schedule() } } }
+    }
+    /// Quitting (or the updater relaunching) must not leave the "keys are idle" marker behind, which the engine would read
+    /// as dimmed keys and ignore every manual change, nor the idle-dimming suspended, nor a held level's slow fade toward
+    /// off still running in macOS with nobody left to restart it.
+    private func shutdown() {
+        timer?.cancel(); timer = nil
+        switch want {
+        case .hold: send(0.001, 250)                                     // macOS's own minimum, rather than creeping to off
+        case .level(let v): if !lit { send(Float(v), 250) }              // quit while the keys were off for inactivity
+        default: break
+        }
+        markIdle(false); setSuspended(false)
     }
     func update(_ w: Want, idleSeconds: Double) {
         q.async { [self] in
@@ -1185,6 +1202,8 @@ final class Model: ObservableObject {
     /// The master switch. One engine command, persisted; the screen follows at once, before the engine replies.
     func setEnabled(_ on: Bool) {
         enabled = on                        // the switch moves under the finger, not a second later
+        // Off gives the keys back before the engine restores the day level, or a held level pulls it down again.
+        if !on { keyboardHold.update(.none, idleSeconds: live.keyboardIdleDimSeconds ?? 5) }
         switchesInFlight += 1
         if hotkeysLive != !isOff { registerHotkeys() }
         drawLook()                          // off: the normal display now; on: still normal until the engine is on
@@ -1289,7 +1308,11 @@ final class Model: ObservableObject {
         if isOff || live.keyboardAutoBrightness == true { return .none }
         guard let v = v else { return .none }
         if v <= 0 { return .off }
-        return v < 0.001 ? .hold(Int(kbTicks(v).rounded())) : .level(v)
+        if v >= 0.001 { return .level(v) }
+        // A fade passes through every value below macOS's minimum: one that rounds to its 54 ticks is that level, and one
+        // under half a tick still lights the lowest.
+        let t = Int(kbTicks(v).rounded())
+        return t >= Int(kbMinTicks) ? .level(0.001) : .hold(max(1, t))
     }
     func syncKeyboardHold() {
         guard !snapshotMode else { return }
