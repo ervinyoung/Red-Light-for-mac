@@ -855,8 +855,10 @@ case "preset":
         cur.filterType = nil; cur.hue = nil; cur.keyboardAutoBrightness = nil; cur.filterEnabled = nil; cur.intensity = nil
         if cur.keyboardBrightness == nil { cur.keyboardBrightness = cfg.night.keyboardBrightness }
         let icon = CommandLine.arguments.count > 4 ? CommandLine.arguments[4] : "star.fill"
+        // Replacing keeps the preset where it was in the list (the pane and the slider marks follow that order).
+        let at = presets.firstIndex { $0.name.lowercased() == name.lowercased() } ?? presets.count
         presets.removeAll { $0.name.lowercased() == name.lowercased() }
-        presets.append(Preset(name: name, icon: icon, settings: cur))
+        presets.insert(Preset(name: name, icon: icon, settings: cur), at: min(at, presets.count))
         c.presets = presets
         if c.nightPresetName?.lowercased() == name.lowercased() { c.nightPresetName = nil }
         saveConfig(c); print("saved preset \(name): \(describe(cur))")
