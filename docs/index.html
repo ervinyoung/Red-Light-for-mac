@@ -71,21 +71,8 @@
   .hero .fine{font-size:12.5px;color:var(--ash);margin-top:12px}
   .shot{position:relative;margin:28px auto 0;max-width:1032px;height:min(52vh,466px);border-radius:18px 18px 0 0;overflow:hidden;border:1px solid rgba(255,255,255,.12);border-bottom:0;filter:url(#hero);
     box-shadow:0 40px 120px rgba(0,0,0,.65);background:#050000}
-  /* the wallpaper: a sun going down behind the pane, so the glass has something to bend */
-  .desk{position:absolute;inset:0;overflow:hidden;
-    background:linear-gradient(180deg,#030000 0%,#120000 38%,#360201 72%,#0d0000 100%)}
-  .desk .sun{position:absolute;left:73%;top:80%;width:520px;height:520px;margin:-260px 0 0 -260px;border-radius:50%;
-    background:radial-gradient(circle at 50% 50%,#ff6a3d 0%,#ff2a12 34%,#c40800 58%,rgba(120,0,0,.0) 72%)}
-  .desk .glow{position:absolute;left:0;right:0;top:80%;height:240px;margin-top:-120px;
-    background:radial-gradient(60% 50% at 73% 50%,rgba(255,40,10,.55),rgba(255,0,0,0) 70%)}
-  .desk .sea{position:absolute;left:0;right:0;top:80%;bottom:0;
-    background:linear-gradient(180deg,rgba(46,2,0,.94) 0%,rgba(14,0,0,.98) 70%,#060000 100%);
-    box-shadow:0 -1px 0 rgba(255,96,60,.55),0 -14px 46px rgba(255,40,10,.28)}
-  .desk .sea i{position:absolute;left:73%;height:5px;border-radius:3px;transform:translateX(-50%);background:rgba(255,60,30,.7);filter:blur(2.5px)}
-  .desk .sea i:nth-child(1){top:14px;width:420px;opacity:.75}.desk .sea i:nth-child(2){top:32px;width:280px;opacity:.5}.desk .sea i:nth-child(3){top:50px;width:150px;opacity:.32}
-  .desk .orb{position:absolute;border-radius:50%;filter:blur(40px)}
-  .desk .orb.a{left:6%;top:18%;width:340px;height:240px;background:rgba(150,0,0,.35)}
-  .desk .orb.b{left:44%;top:-10%;width:420px;height:260px;background:rgba(90,0,10,.45)}
+  /* the wallpaper: folds of red silk in the dark, so the glass has colour and shape to bend */
+  .desk{position:absolute;inset:0;background:#050000 url(img/wallpaper.jpg) center/cover no-repeat}
   /* macOS 26 menu bar: no bar, just type and glyphs on the wallpaper */
   .menubar{position:absolute;inset-inline:0;top:0;height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-size:12.5px;font-weight:500;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.45);z-index:2}
   .menubar .l{display:flex;gap:18px}.menubar .l b{font-weight:700}
@@ -162,7 +149,7 @@
   footer .wrap{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px}
   footer a{color:var(--mist)}footer a:hover{color:var(--ember)}
   @media (prefers-reduced-motion:reduce){.field,.rim{display:none}.reveal{height:auto}.hero{position:relative}}
-  @media (max-width:860px){.wall{grid-template-columns:1fr 1fr}.pull{grid-template-columns:1fr}.core{grid-template-columns:1fr}.core .native{flex-direction:column;align-items:flex-start;padding-right:28px}.core .native .frame{width:100%;border-radius:22px}.panel{right:12px;width:270px}.desk .sun{left:62%}.shot{height:400px}.shot .cap{display:none}nav .line{display:none}}
+  @media (max-width:860px){.wall{grid-template-columns:1fr 1fr}.pull{grid-template-columns:1fr}.core{grid-template-columns:1fr}.core .native{flex-direction:column;align-items:flex-start;padding-right:28px}.core .native .frame{width:100%;border-radius:22px}.panel{right:12px;width:270px}.shot{height:400px}.shot .cap{display:none}nav .line{display:none}}
 </style>
 </head>
 <body>
@@ -196,7 +183,7 @@
     </div>
     <div class="fine">Free and open source. Apple silicon, macOS 26 or later.</div>
     <div class="shot" role="img" aria-label="Red Light open from the macOS menu bar at night: Red Shift 80%, keyboard backlight 0.3%, the Night preset selected, in a Liquid Glass panel">
-      <div class="desk" aria-hidden="true"><div class="orb a"></div><div class="orb b"></div><div class="sun"></div><div class="glow"></div><div class="sea"><i></i><i></i><i></i></div></div>
+      <div class="desk" aria-hidden="true"></div>
       <div class="menubar">
         <div class="l"><b></b><span>Finder</span><span>File</span><span>Edit</span><span>View</span><span>Go</span><span>Window</span><span>Help</span></div>
         <div class="r">
