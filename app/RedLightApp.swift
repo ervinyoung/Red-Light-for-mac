@@ -839,12 +839,20 @@ final class KeyboardHold {
         q.async { [self] in
             idle = idleSeconds
             guard w != want else { return }
+            var was = false, now = false
+            switch want { case .level, .hold: was = true; default: break }
+            switch w { case .level, .hold: now = true; default: break }
+            // A new level that comes from the engine (each minute of a sunset fade, a preset, the command line) must not
+            // light keys that went dark for inactivity: the next touch lights them at the new level. A touch that is
+            // happening now (the slider) lights them at once.
+            let wake = !(was && now) || lit || idleTime() < 0.5
             want = w; up = false; fastDown = false; lastKeep = .distantPast; lastMove = Date()
-            setSuspended(w != .none); markIdle(false)
+            setSuspended(w != .none)
+            if wake { markIdle(false) }
             switch w {
             case .off: send(0, 250)
-            case .level(let v): lit = true; send(Float(v), 250)          // immediately, whatever macOS thought of the keys
-            case .hold: lit = true
+            case .level(let v): if wake { lit = true; send(Float(v), 250) }          // immediately, whatever macOS thought of the keys
+            case .hold: if wake { lit = true }
             case .none: break
             }
             schedule()
