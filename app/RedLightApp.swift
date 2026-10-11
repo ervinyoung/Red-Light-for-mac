@@ -897,7 +897,8 @@ final class KeyboardHold {
     /// trackpad, so at night you can find them without pressing one.
     private func idleTime() -> Double {
         let kinds: [CGEventType] = [.keyDown, .flagsChanged, .mouseMoved, .leftMouseDown, .rightMouseDown,
-                                    .leftMouseDragged, .rightMouseDragged, .scrollWheel, .otherMouseDown]
+                                    .leftMouseDragged, .rightMouseDragged, .scrollWheel, .otherMouseDown,
+                                    CGEventType(rawValue: 14)!]        // system-defined: the brightness and media keys
         return kinds.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? 0
     }
     private func schedule() {
@@ -1529,7 +1530,7 @@ struct KeyboardSlider: View {
     }
     /// Snaps on the left; continuous past macOS's minimum.
     static func snap(_ p: Double) -> (position: Double, ticks: Double) {
-        if p < zone + 0.03 { let i = stops.indices.min { abs(stops[$0] - p) < abs(stops[$1] - p) }!; return (stops[i], stopTicks[i]) }
+        if p < zone + 0.002 { let i = stops.indices.min { abs(stops[$0] - p) < abs(stops[$1] - p) }!; return (stops[i], stopTicks[i]) }
         let f = (p - zone) / (1 - zone)
         return (p, exp(log(kbMinTicks) + f * (log(kbMaxTicks) - log(kbMinTicks))).rounded())
     }
