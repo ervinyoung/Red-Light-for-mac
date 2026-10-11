@@ -627,8 +627,11 @@ final class Updater: ObservableObject {
         let last = UserDefaults.standard.object(forKey: "lastUpdateCheck") as? Date ?? .distantPast
         if Date().timeIntervalSince(last) > 86400 { check(userInitiated: false) }
         // Not while the panel (or the true-colour prompt) is open: the restart would pull it out from under the pointer.
-        if automatic, screenIsPlain, let r = available, r.version != blocked, !busy, NSApp.keyWindow?.isVisible != true { install() }
+        mayInstallNow = automatic && screenIsPlain && NSApp.keyWindow?.isVisible != true
+        if mayInstallNow, let r = available, r.version != blocked, !busy { install(automatic: true) }
     }
+    /// As of the last tick. A download can outlast sunset, so an automatic install asks again before it swaps.
+    private var mayInstallNow = false
     /// Where this copy can't be replaced: a disk image, the read-only copy macOS runs a quarantined download from
     /// (App Translocation), or a folder this user can't write to. Checked before downloading, so a doomed install
     /// isn't fetched again every minute.
@@ -648,10 +651,12 @@ final class Updater: ObservableObject {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.busy = false
-                UserDefaults.standard.set(Date(), forKey: "lastUpdateCheck")
                 guard let data = data, let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let tag = j["tag_name"] as? String, let assets = j["assets"] as? [[String: Any]] else {
+                    // Offline at wake, or a rate limit: look again in an hour, not tomorrow.
+                    UserDefaults.standard.set(Date().addingTimeInterval(3600 - 86400), forKey: "lastUpdateCheck")
                     if userInitiated { self.status = "Couldn’t reach GitHub" }; return }
+                UserDefaults.standard.set(Date(), forKey: "lastUpdateCheck")
                 func url(_ name: String) -> URL? { assets.first { $0["name"] as? String == name }.flatMap { ($0["browser_download_url"] as? String).flatMap(URL.init) } }
                 let v = tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
                 if Self.newer(v, than: Self.current), let z = url("Red-Light.zip"), let s = url("Red-Light.zip.sig") {
@@ -661,7 +666,7 @@ final class Updater: ObservableObject {
             }
         }.resume()
     }
-    func install() {
+    func install(automatic auto: Bool = false) {
         guard let r = available, !busy else { return }
         if let why = Self.cannotReplaceHere { status = why; blocked = r.version; return }
         busy = true; status = "Downloading \(r.version)…"
@@ -674,14 +679,19 @@ final class Updater: ObservableObject {
                 // A failed swap won't go better tomorrow: that version is blocked from automatic installs instead.
                 switch result {
                 case .success(let staged):
+                    // Sunset came during the download (or the panel opened): the staged copy goes, the next quiet tick tries again.
+                    if auto && !self.mayInstallNow { try? FileManager.default.removeItem(at: staged.dir); self.status = ""; return }
                     self.status = "Restarting…"
                     if let e = Self.replaceAndRelaunch(with: staged) { self.status = e.localizedDescription; self.blocked = r.version }
-                case .failure(let e): self.status = e.localizedDescription; self.available = nil
+                case .failure(let e):
+                    self.status = e.localizedDescription
+                    // A code signature that fails for this copy's own team fails the same way tomorrow: no daily re-download.
+                    if (e as? Failure)?.permanent == true { self.blocked = r.version } else { self.available = nil }
                 }
             }
         }
     }
-    struct Failure: LocalizedError { let errorDescription: String? }
+    struct Failure: LocalizedError { let errorDescription: String?; var permanent = false }
     /// A GET with a deadline, on a background queue. Only a 200 counts: a 404 page or a rate-limit notice is no zip.
     private static func fetch(_ u: URL) -> Data? {
         var out: Data?; let done = DispatchSemaphore(value: 0)
@@ -701,14 +711,15 @@ final class Updater: ObservableObject {
         let fm = FileManager.default
         let dir = (try? fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: Bundle.main.bundleURL, create: true))
             ?? fm.temporaryDirectory.appendingPathComponent("RedLightUpdate-\(UUID().uuidString)")
-        func fail(_ s: String) -> Result<(app: URL, dir: URL), Error> { try? fm.removeItem(at: dir); return .failure(Failure(errorDescription: s)) }
+        func fail(_ s: String, permanent: Bool = false) -> Result<(app: URL, dir: URL), Error> {
+            try? fm.removeItem(at: dir); return .failure(Failure(errorDescription: s, permanent: permanent)) }
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         let zipURL = dir.appendingPathComponent("Red-Light.zip")
         guard (try? zip.write(to: zipURL)) != nil, runStatus("/usr/bin/ditto", ["-x", "-k", zipURL.path, dir.path]).ok else { return fail("Couldn’t unpack the update") }
         let app = dir.appendingPathComponent("Red Light.app")
         guard let info = Bundle(url: app)?.infoDictionary, info["CFBundleIdentifier"] as? String == Bundle.main.bundleIdentifier,
               let v = info["CFBundleShortVersionString"] as? String, newer(v, than: current) else { return fail("The update wasn’t a newer Red Light") }
-        guard codeSignatureMatches(app) else { return fail("The update’s code signature didn’t check out; not installed") }
+        guard codeSignatureMatches(app) else { return fail("The update’s code signature didn’t check out; not installed", permanent: true) }
         _ = runStatus("/usr/bin/xattr", ["-dr", "com.apple.quarantine", app.path])
         return .success((app, dir))
     }
@@ -730,10 +741,11 @@ final class Updater: ObservableObject {
     }
     /// Swap the bundle in place (one rename), then start the new copy once this one has gone. Returns why it couldn't.
     private static func replaceAndRelaunch(with staged: (app: URL, dir: URL)) -> Error? {
-        defer { try? FileManager.default.removeItem(at: staged.dir) }
         let dest: URL
         do { dest = try FileManager.default.replaceItemAt(Bundle.main.bundleURL, withItemAt: staged.app) ?? Bundle.main.bundleURL }
-        catch { NSLog("update: \(error)"); return Failure(errorDescription: "Couldn’t replace Red Light; not updated") }
+        catch { NSLog("update: \(error)"); try? FileManager.default.removeItem(at: staged.dir); return Failure(errorDescription: "Couldn’t replace Red Light; not updated") }
+        // Before relaunching: terminate() exits the process, so nothing after it (a defer included) ever runs.
+        try? FileManager.default.removeItem(at: staged.dir)
         return relaunch(dest) ? nil : Failure(errorDescription: "Updated; quit and reopen Red Light to finish")
     }
     /// Starts `app` once this process has exited (two copies can't run at once). The path is an argument to the
