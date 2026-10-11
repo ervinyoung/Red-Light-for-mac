@@ -55,6 +55,8 @@ struct Commanded: Codable { var keyboardBrightness: Double? }
 let kbFloor = 0.001
 func isExtraDim(_ v: Double?) -> Bool { guard let v = v else { return false }; return v > 0 && v < kbFloor }
 let extraDimLevels = [2.0, 4, 9, 21].map { $0 / 54 * kbFloor }
+/// PWM ticks of a stored level (see kbTicks in the app): 54 at macOS's minimum, 336 at full.
+func kbTicksOf(_ v: Double) -> Double { v <= 0 ? 0 : v < kbFloor ? v / kbFloor * 54 : max(54, 51.5 + 284.5 * v) }
 func loadCommanded() -> Commanded { (try? Data(contentsOf: cmdURL)).flatMap { try? JSONDecoder().decode(Commanded.self, from: $0) } ?? Commanded() }
 func saveCommanded(_ c: Commanded) { let e = JSONEncoder(); e.outputFormatting = [.prettyPrinted, .sortedKeys]; try? e.encode(c).write(to: cmdURL, options: .atomic) }
 func loadShade() -> Shade { (try? Data(contentsOf: shadeURL)).flatMap { try? JSONDecoder().decode(Shade.self, from: $0) } ?? Shade() }
@@ -428,8 +430,8 @@ func observe(cfg: Config, learned: Learned, state: State, now: Date) -> (State, 
     let todayRise = sunTimes(lat: cfg.latitude, lon: cfg.longitude, date: now).rise ?? now
     let nightID = dayFmt.string(from: now < todayRise ? day(-1, from: now) : now)
     var fields: Set<String> = []
-    func changed(_ field: String, _ a: Double?, _ b: Double?, tol: Double) {
-        guard let a = a, let b = b, abs(a - b) > tol else { return }
+    func changed(_ field: String, _ a: Double?, _ b: Double?, tol: Double, differ: ((Double, Double) -> Bool)? = nil) {
+        guard let a = a, let b = b, differ?(a, b) ?? (abs(a - b) > tol) else { return }
         fields.insert(field)
         let ev = Event(t: now, mode: state.mode, nightID: nightID, minsFromSunset: now.timeIntervalSince(set) / 60,
                        minsFromSunrise: now.timeIntervalSince(rise) / 60, field: field, from: a, to: b)
@@ -440,7 +442,10 @@ func observe(cfg: Config, learned: Learned, state: State, now: Date) -> (State, 
     // The tint leg follows warmth across 60 %: easing red from 80 % to 50 % is one change, not also "switched the
     // filter off" — which the timing rules would read as turning red light off and move sunrise or sunset.
     if prev.warmth == cur.warmth { changed("filterEnabled", prev.filterEnabled.map { $0 ? 1 : 0 }, cur.filterEnabled.map { $0 ? 1 : 0 }, tol: 0.5) }
-    changed("keyboardBrightness", prev.keyboardBrightness, cur.keyboardBrightness, tol: 0.005)
+    // Below macOS's minimum every level is within 0.001 of the next, so a hand-set Starlight, Moonlight, Candlelight or
+    // Firelight (or off) is told by its ticks as well: a fade used to carry on over it.
+    changed("keyboardBrightness", prev.keyboardBrightness, cur.keyboardBrightness, tol: 0.005,
+            differ: { abs($0 - $1) > 0.005 || abs(kbTicksOf($0) - kbTicksOf($1)) > 1.5 })
     // Under auto-brightness the level isn't read, so a keyboard slider (auto off) or the system's own switch (auto on)
     // went unseen and a fade turned it straight back. Not a lesson — one side has no level — but the fade must keep it.
     if let a = prev.keyboardAutoBrightness, let b = cur.keyboardAutoBrightness, a != b { fields.insert("keyboardBrightness") }
