@@ -915,7 +915,7 @@ final class KeyboardHold {
         if t != lastTick { lastTick = t; lastMove = now }
         let stalled = now.timeIntervalSince(lastMove) > 0.4
         if !lit {                                                       // off after inactivity: wait for a touch
-            if idleTime() < 0.5 {
+            if idleTime() < 0.5 || idle <= 0 || idleTime() + 0.5 < idle {     // a touch, or the idle time raised past how long you've been away
                 lit = true; up = false; fastDown = false; lastMove = now; markIdle(false)
                 if case .level(let v) = want { send(Float(v), 250) }
                 schedule()
