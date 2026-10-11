@@ -1215,6 +1215,7 @@ final class Model: ObservableObject {
     }
     func startRecording(_ which: String) {
         stopRecording(); recording = which
+        HotKeys.shared.register([])             // while recording, the current shortcuts are keys to capture, not to act on
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] ev in
             guard let self = self else { return ev }
             if ev.keyCode == 53 { self.stopRecording(); return nil }
@@ -1223,7 +1224,8 @@ final class Model: ObservableObject {
             if ev.modifierFlags.contains(.option) { mods.append("option") }
             if ev.modifierFlags.contains(.shift) { mods.append("shift") }
             if ev.modifierFlags.contains(.command) { mods.append("command") }
-            guard !mods.isEmpty else { NSSound.beep(); return nil }
+            // Shift or Option alone would swallow ordinary typing (capitals, ø å ∆) in every app, and macOS won't register them.
+            guard mods.contains("control") || mods.contains("command") else { NSSound.beep(); return nil }
             var hk = self.config.shortcuts ?? Shortcuts()
             let sc = Shortcut(keyCode: Int(ev.keyCode), modifiers: mods)
             switch which { case "toggleShade": hk.toggleShade = sc; case "shadeDown": hk.shadeDown = sc; default: hk.shadeUp = sc }
@@ -1231,7 +1233,10 @@ final class Model: ObservableObject {
             return nil
         }
     }
-    func stopRecording() { if let m = monitor { NSEvent.removeMonitor(m) }; monitor = nil; recording = nil }
+    func stopRecording() {
+        if let m = monitor { NSEvent.removeMonitor(m) }; monitor = nil
+        if recording != nil { recording = nil; registerHotkeys() }
+    }
 
     func parseLive(_ out: String) {
         guard let line = out.components(separatedBy: "\n").first(where: { $0.hasPrefix("current:") }) else { return }
