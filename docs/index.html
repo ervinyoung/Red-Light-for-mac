@@ -48,19 +48,21 @@
      opens an iris from the centre, and once it has opened it does not come back. */
   .field{position:fixed;inset:0;z-index:60;overflow:hidden;
     background:radial-gradient(120vmax 90vmax at 50% 50%, var(--red-50) 0%, var(--red-30) 45%, var(--red-8) 100%);
-    -webkit-mask:radial-gradient(circle at 50% 50%, transparent var(--hole,0px), #000 calc(var(--hole,0px) + 1px));
-            mask:radial-gradient(circle at 50% 50%, transparent var(--hole,0px), #000 calc(var(--hole,0px) + 1px))}
+    -webkit-mask:radial-gradient(circle at var(--cx,50%) var(--cy,50%), transparent var(--hole,0px), #000 calc(var(--hole,0px) + 1px));
+            mask:radial-gradient(circle at var(--cx,50%) var(--cy,50%), transparent var(--hole,0px), #000 calc(var(--hole,0px) + 1px))}
   .field .grain{position:absolute;inset:0;opacity:.12;mix-blend-mode:overlay;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
-  .field .inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:var(--textop,1);transform:scale(calc(1 + .05*var(--p,0)))}
-  .field .icon{width:clamp(96px,12vw,148px);height:auto;margin-bottom:clamp(18px,2.4vw,28px);filter:drop-shadow(0 18px 50px rgba(255,0,0,.35))}
-  .field .mark{font-family:var(--rounded);font-weight:700;letter-spacing:-.03em;line-height:1;font-size:clamp(56px,9vw,120px);color:var(--red);
+  /* the icon and wordmark sit above the field, so the opening can grow out from behind the icon */
+  .intro{position:fixed;inset:0;z-index:62;pointer-events:none}
+  .intro .inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:var(--iconop,1);transform:scale(calc(1 + .05*var(--p,0)))}
+  .intro .icon{width:clamp(96px,12vw,148px);height:auto;margin-bottom:clamp(18px,2.4vw,28px);filter:drop-shadow(0 18px 50px rgba(255,0,0,.35))}
+  .intro .mark{font-family:var(--rounded);font-weight:700;letter-spacing:-.03em;line-height:1;font-size:clamp(56px,9vw,120px);color:var(--red);
     text-shadow:0 0 70px rgba(255,0,0,.35)}
   .field .cue{position:absolute;bottom:34px;left:50%;transform:translateX(-50%);font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--red-80);opacity:var(--textop,1);display:flex;flex-direction:column;align-items:center;gap:10px}
   .field .cue i{width:1px;height:34px;background:linear-gradient(180deg,var(--red),transparent);display:block;animation:drip 2.4s ease-in-out infinite}
   @keyframes drip{0%{transform:scaleY(.2);transform-origin:top;opacity:0}40%{transform:scaleY(1);opacity:1}100%{transform:scaleY(1);opacity:0}}
-  .rim{position:fixed;left:50%;top:50%;width:calc(var(--hole,0px)*2);height:calc(var(--hole,0px)*2);transform:translate(-50%,-50%);border-radius:50%;z-index:61;pointer-events:none;opacity:var(--rimop,0);
-    box-shadow:0 0 0 1px rgba(255,0,0,.6),0 0 40px 6px rgba(255,0,0,.4)}
+  .rim{position:fixed;left:var(--cx,50%);top:var(--cy,50%);width:calc(var(--hole,0px)*2);height:calc(var(--hole,0px)*2);transform:translate(-50%,-50%);border-radius:50%;z-index:61;pointer-events:none;opacity:var(--rimop,0);
+    box-shadow:0 0 0 1.5px rgba(255,90,60,.75),0 0 46px 10px rgba(255,20,0,.55),0 0 120px 40px rgba(255,0,0,.28),inset 0 0 50px 6px rgba(255,30,0,.4)}
   .reveal{position:relative;height:calc(var(--pinh,100vh) + var(--budget,26vh))}
   .reveal.off{height:auto}.reveal.off .hero{position:relative}
   .hero{position:sticky;top:0;padding:84px 0 0;overflow:hidden;background:var(--void)}
@@ -148,7 +150,7 @@
   footer{border-top:1px solid var(--edge);padding:22px 0 26px;color:var(--ash);font-size:13px}
   footer .wrap{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px}
   footer a{color:var(--mist)}footer a:hover{color:var(--ember)}
-  @media (prefers-reduced-motion:reduce){.field,.rim{display:none}.reveal{height:auto}.hero{position:relative}}
+  @media (prefers-reduced-motion:reduce){.field,.rim,.intro{display:none}.reveal{height:auto}.hero{position:relative}}
   @media (max-width:860px){.wall{grid-template-columns:1fr 1fr}.pull{grid-template-columns:1fr}.core{grid-template-columns:1fr}.core .native{flex-direction:column;align-items:flex-start;padding-right:28px}.core .native .frame{width:100%;border-radius:22px}.panel{right:12px;width:270px}.shot{height:400px}.shot .cap{display:none}nav .line{display:none}}
 </style>
 </head>
@@ -159,10 +161,10 @@
 
 <div class="field" id="field" aria-hidden="true">
   <div class="grain"></div>
-  <div class="inner"><img class="icon" src="img/icon.png" alt="" width="148" height="148"><div class="mark">Red Light</div></div>
   <div class="cue"><i></i>Scroll</div>
 </div>
 <div class="rim" id="rim" aria-hidden="true"></div>
+<div class="intro" id="intro" aria-hidden="true"><div class="inner"><img class="icon" src="img/icon.png" alt="" width="148" height="148"><div class="mark">Red Light</div></div></div>
 
 <nav><div class="wrap">
   <a class="brand" href="#"><img src="img/icon.png" alt="" width="30" height="30">Red Light</a>
@@ -262,11 +264,11 @@
 
 <script>
 (function(){
-  var root=document.documentElement, field=document.getElementById('field'), rim=document.getElementById('rim'), hm=document.getElementById('hm');
+  var root=document.documentElement, field=document.getElementById('field'), rim=document.getElementById('rim'), intro=document.getElementById('intro'), icon=intro.querySelector('.icon'), hm=document.getElementById('hm');
   var reveal=document.getElementById('reveal'), hero=document.querySelector('.hero');
   var KEY='redlight-intro-seen';
   function identity(){ hm.setAttribute('values','1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0'); }
-  function dismiss(){ field.remove(); rim.remove(); reveal.classList.add('off'); identity(); try{ sessionStorage.setItem(KEY,'1'); }catch(e){} }
+  function dismiss(){ field.remove(); rim.remove(); intro.remove(); reveal.classList.add('off'); identity(); try{ sessionStorage.setItem(KEY,'1'); }catch(e){} }
   var seen=false; try{ seen=sessionStorage.getItem(KEY)==='1'; }catch(e){}
   if(seen || window.matchMedia('(prefers-reduced-motion: reduce)').matches){ dismiss(); return; }
   var BUDGET=function(){return Math.max(1,Math.round(window.innerHeight*0.26))};
@@ -279,9 +281,15 @@
   function update(){
     ticking=false; if(done) return;
     var raw=Math.max(0,Math.min(1,window.scrollY/BUDGET())), p=ease(raw);
-    var r=p*(Math.hypot(window.innerWidth,window.innerHeight)/2+40);
+    // The opening is centred on the icon and starts just inside its edge, so it emerges from behind it,
+    // then grows until it clears the farthest corner of the window.
+    var b=icon.getBoundingClientRect(), cx=b.left+b.width/2, cy=b.top+b.height/2, W=window.innerWidth, H=window.innerHeight;
+    var far=Math.max(Math.hypot(cx,cy),Math.hypot(W-cx,cy),Math.hypot(cx,H-cy),Math.hypot(W-cx,H-cy))+40, r0=b.width*0.42;
+    var r=raw<=0?0:r0+p*(far-r0);
+    root.style.setProperty('--cx',cx.toFixed(1)+'px'); root.style.setProperty('--cy',cy.toFixed(1)+'px');
     root.style.setProperty('--p',p.toFixed(4)); root.style.setProperty('--hole',r.toFixed(1)+'px');
     root.style.setProperty('--textop',Math.max(0,1-raw/0.16).toFixed(3));
+    root.style.setProperty('--iconop',Math.max(0,1-Math.pow(raw/0.4,1.4)).toFixed(3));   // the icon lingers while the light leaves it
     root.style.setProperty('--rimop',(raw<=0?0:Math.max(0,1-Math.pow(raw,1.6))).toFixed(3));
     hm.setAttribute('values',matrixFor(1-p));
     if(raw>=1){ done=true; var y=window.scrollY-BUDGET(); dismiss(); window.scrollTo(0,Math.max(0,y)); }   // it has opened; it stays open
