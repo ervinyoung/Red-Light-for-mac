@@ -764,19 +764,22 @@ func kbValue(_ ticks: Double) -> Double {
     if ticks < kbMinTicks { return ticks / kbMinTicks * 0.001 }
     return ticks < kbMinTicks + 1 ? 0.001 : min(1, (ticks - 51.5) / 284.5)
 }
-/// Percent of the backlight's full output: honest about how much light each level gives.
+/// The four levels below macOS's minimum are named, dimmest first, after light you would still read by at night.
+let kbDimNames = ["Starlight", "Moonlight", "Candlelight", "Firelight"]
+/// Off, a named extra-dim level, or a percentage of macOS's own range, where 1% is its minimum and 100% is full.
 func fmtKeyboard(_ v: Double?) -> String {
     let t = kbTicks(v); guard t > 0 else { return "Off" }
-    let p = t / kbMaxTicks * 100
-    return p < 10 ? String(format: "%.1f%%", p) : "\(Int(p.rounded()))%"
+    if t < kbMinTicks - 0.5 { let i = kbDimTicks.indices.min { abs(kbDimTicks[$0] - t) < abs(kbDimTicks[$1] - t) }!; return kbDimNames[i] }
+    let f = (log(t) - log(kbMinTicks)) / (log(kbMaxTicks) - log(kbMinTicks))
+    return "\(Int((1 + 99 * max(0, min(1, f))).rounded()))%"
 }
 
 /// Holds the backlight at an extra-dim level. macOS restarts a fade from wherever the light is, and drops a request
 /// whose target equals the running one; so a slow fade toward off, re-aimed and restarted every half second, long
 /// before it can move a tick, keeps the light where it is, and a quick fade up corrects the occasional slip.
 /// macOS ignores requests once it has idle-dimmed the keys, so while holding, its idle-dimming is suspended and
-/// this does the idle-off itself, as macOS does, from the last keypress: it fades the keys out after the idle time,
-/// and back in from off at the next key.
+/// this does the idle-off itself: it fades the keys out after the idle time without typing or touching the pointer,
+/// and back in from off at the next key, movement or click.
 final class KeyboardHold {
     private typealias SetFn = @convention(c) (AnyObject, Selector, Float, Int32, Bool, UInt64) -> Bool
     private typealias GetFn = @convention(c) (AnyObject, Selector, UInt64) -> Float
@@ -835,11 +838,12 @@ final class KeyboardHold {
     }
     private func reg(_ key: String) -> NSNumber? { IORegistryEntryCreateCFProperty(backlight, key as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber }
     private func tick() -> Int { (reg("enabled")?.boolValue ?? false) ? (reg("high-period")?.intValue ?? 0) : 0 }
-    /// Seconds since the last keypress. macOS's own keyboard idle-off counts typing only (scrolling or moving the
-    /// pointer leaves the keys dark), so this does the same.
+    /// Seconds since the last keypress, pointer movement, click or scroll: the keys light as soon as you reach for the
+    /// trackpad, so at night you can find them without pressing one.
     private func idleTime() -> Double {
-        min(CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown),
-            CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .flagsChanged))
+        let kinds: [CGEventType] = [.keyDown, .flagsChanged, .mouseMoved, .leftMouseDown, .rightMouseDown,
+                                    .leftMouseDragged, .rightMouseDragged, .scrollWheel, .otherMouseDown]
+        return kinds.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? 0
     }
     private func schedule() {
         // macOS ignores brightness requests once it has idle-dimmed the keys, so while holding, its idle-dimming is
@@ -968,7 +972,7 @@ final class Model: ObservableObject {
         state = ModeState(mode: "night", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil, disabled: false, heldFor: nil)
         let c = warmthCurve(0.8)
         shade = Shade(enabled: false, level: 0.2, warmth: 0.8, gammaBlue: c.blue, gammaGreen: c.green)
-        live = Settings(keyboardBrightness: 0.003, keyboardIdleDimSeconds: 5, shadeEnabled: false, shadeLevel: 0.2, warmth: 0.8)
+        live = Settings(keyboardBrightness: ProcessInfo.processInfo.environment["REDLIGHT_DEMO_KB"].flatMap(Double.init) ?? 0.003, keyboardIdleDimSeconds: 5, shadeEnabled: false, shadeLevel: 0.2, warmth: 0.8)
         enabled = true
         sunLine = "sunrise 7:11 AM (switch 7:11 AM)   sunset 6:39 PM (switch 6:39 PM)   now 11:58 PM -> night"
     }
@@ -1431,14 +1435,14 @@ struct GlassSlider: View {
         }
     }
 }
-/// Keyboard Backlight: off and four extra-dim levels on the left, snapping, then all of macOS's range, continuous and
-/// perceptually even (a log scale of light output). Marks sit only where something is: each extra-dim level and the
+/// Keyboard Backlight: off and the four named extra-dim levels on the left half, snapping, then all of macOS's range on
+/// the right half, continuous and perceptually even (a log scale of light output). Marks sit only where something is: each extra-dim level and the
 /// point where macOS's own minimum begins.
 struct KeyboardSlider: View {
     let current: Double?
     let onChange: (Double, Bool) -> Void          // ticks, final
-    static let zone = 0.30
-    static let stops: [Double] = [0, 0.06, 0.12, 0.18, 0.24, 0.30]             // off, the four levels, macOS's minimum
+    static let zone = 0.5                                                       // half the track: off and the four named levels
+    static let stops: [Double] = [0, 0.1, 0.2, 0.3, 0.4, 0.5]                  // off, the four levels, macOS's minimum
     static let stopTicks: [Double] = [0] + kbDimTicks + [kbMinTicks]
     static func position(_ t: Double) -> Double {
         if t <= 0 { return 0 }
@@ -1450,7 +1454,7 @@ struct KeyboardSlider: View {
     }
     /// Snaps on the left; continuous past macOS's minimum.
     static func snap(_ p: Double) -> (position: Double, ticks: Double) {
-        if p < zone + 0.02 { let i = stops.indices.min { abs(stops[$0] - p) < abs(stops[$1] - p) }!; return (stops[i], stopTicks[i]) }
+        if p < zone + 0.03 { let i = stops.indices.min { abs(stops[$0] - p) < abs(stops[$1] - p) }!; return (stops[i], stopTicks[i]) }
         let f = (p - zone) / (1 - zone)
         return (p, exp(log(kbMinTicks) + f * (log(kbMaxTicks) - log(kbMinTicks))).rounded())
     }

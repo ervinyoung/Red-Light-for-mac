@@ -36,7 +36,7 @@
 - **Presets.** Dusk, Night, Movie, and Deep night set the display, keyboard, and screen shade at once.
 - **Adaptive.** Settings you choose on 3 of 14 nights become your defaults.
 - **True color.** Figma, Sketch, and Photoshop get accurate color while they're in front.
-- **Dimmer keys.** Four keyboard backlight levels below macOS's minimum, down to 1/27 of it.
+- **Dimmer keys.** Starlight, Moonlight, Candlelight, and Firelight: four keyboard levels below macOS's minimum.
 
 Evening screen light cuts melatonin by 55% and delays your body clock by 1.5 hours
 ([Chang et al., PNAS, 2015](https://www.pnas.org/doi/10.1073/pnas.1418490112)). Red Light isn't a medical device.

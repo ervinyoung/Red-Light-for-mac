@@ -71,7 +71,7 @@ The following table lists the commands:
 | `redlight pause sunrise` | Pause until the next sunrise. |
 | `redlight resume` | End a pause and turn the switch on. |
 | `redlight set warmth 80` | Set Red Shift from 0 to 100, or `off`. For details, see [Red Shift](#red-shift). |
-| `redlight set keyboard 30` | Set the keyboard backlight in percent of macOS's range, from 0.1 to 100, or `off`. Use `dim1` to `dim4` for the levels below macOS's minimum. |
+| `redlight set keyboard 30` | Set the keyboard backlight in percent of macOS's range, from 0.1 to 100, or `off`. Use `dim1` to `dim4` for Starlight, Moonlight, Candlelight, and Firelight. |
 | `redlight set idle 30` | Turn the keyboard backlight off after the given number of seconds of inactivity. |
 | `redlight set shade 40` | Set the screen shade from 0 to 90, or `off`. |
 | `redlight preset list` | List presets. Other subcommands are `apply "Night"`, `save "Reading" book.fill`, `night "Night"`, and `delete "Reading"`. |
@@ -157,18 +157,24 @@ Red Light stores its files in `~/Library/Application Support/RedLight`:
 
 The keyboard backlight is driven by a PWM signal with a 960-step cycle. macOS's levels run from 54 steps (its
 minimum) to 336 (full), but the hardware can go down to 1 step: macOS only passes through those levels while it
-fades the keys off. Red Light adds four levels below macOS's minimum, at 2, 4, 9, and 21 steps, which are 1/27,
-1/14, 1/6, and 2/5 of the minimum.
+fades the keys off. Red Light adds four named levels below macOS's minimum:
 
-To hold an extra-dim level, the menu bar app keeps restarting a slow fade before it can move a step. While it
+| Level | Steps | Share of macOS's minimum |
+| --- | --- | --- |
+| Starlight | 2 | 1/27 |
+| Moonlight | 4 | 1/14 |
+| Candlelight | 9 | 1/6 |
+| Firelight | 21 | 2/5 |
+
+To hold one of these levels, the menu bar app keeps restarting a slow fade before it can move a step. While it
 holds, macOS's own idle-off is paused, and Red Light turns the keys off itself after your **Turn Off After
-Inactivity** time without typing, and back on at the next keypress. The extra-dim levels work only while the app
-is open. If you change the brightness with the keyboard's brightness keys or Control Center, Red Light releases
-the backlight at the new level.
+Inactivity** time, and back on as soon as you type, move the pointer, click, or scroll, so you can find the keys
+at night without pressing one. The named levels work only while the app is open. If you change the brightness
+with the keyboard's brightness keys or Control Center, Red Light releases the backlight at the new level.
 
-The **Keyboard Backlight** slider shows the share of the backlight's full output. The left part of the slider holds
-**Off** and the four extra-dim levels, and snaps to them. The taller mark shows where macOS's range starts; from
-there the slider moves continuously to full brightness.
+The left half of the **Keyboard Backlight** slider holds **Off** and the four named levels, and snaps to them. The
+taller mark shows where macOS's range starts; from there the slider moves continuously, from 1% (macOS's
+minimum) to 100%.
 
 ## The menu bar app
 
