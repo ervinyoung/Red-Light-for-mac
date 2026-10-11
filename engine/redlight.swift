@@ -451,6 +451,7 @@ func median(_ xs: [Double]) -> Double { let s = xs.sorted(); return s.count % 2 
 func learn(cfg: Config, learned: Learned, state: inout State, now: Date) -> Learned {
     let L = cfg.learning ?? Learning()
     guard L.enabled else { return learned }
+    let minNights = max(1, L.minNights)     // a hand-edited 0 let an empty set through to median(), which trapped on every check
     var new = learned
     let events = loadEvents(since: now.addingTimeInterval(-Double(L.lookbackDays) * 86400))
     guard !events.isEmpty else { return learned }
@@ -462,9 +463,9 @@ func learn(cfg: Config, learned: Learned, state: inout State, now: Date) -> Lear
         for e in events where e.field == field && e.mode == "night" && e.t >= (learned.levelsSince ?? .distantPast)
                                && !(field == "warmth" && e.to <= 0.02) { lastPerNight[e.nightID] = e.to }
         let vals = Array(lastPerNight.values)
-        guard vals.count >= L.minNights else { return nil }
+        guard vals.count >= minNights else { return nil }
         let m = median(vals)
-        return vals.filter { abs($0 - m) <= tol }.count >= L.minNights ? m : nil
+        return vals.filter { abs($0 - m) <= tol }.count >= minNights ? m : nil
     }
     if let v = settledNightValue("warmth", tol: 0.1) {
         let cur = learned.nightWarmth ?? cfg.night.warmth ?? 0
@@ -487,9 +488,9 @@ func learn(cfg: Config, learned: Learned, state: inout State, now: Date) -> Lear
         var perNight: [String: Double] = [:]
         for e in events where e.field == "warmth" || e.field == "filterEnabled" { if let o = pred(e) { perNight[e.nightID] = o } }
         let vals = Array(perNight.values)
-        guard vals.count >= L.minNights else { return nil }
+        guard vals.count >= minNights else { return nil }
         let m = median(vals)
-        return vals.filter { abs($0 - m) <= 30 }.count >= L.minNights ? m : nil
+        return vals.filter { abs($0 - m) <= 30 }.count >= minNights ? m : nil
     }
     func turnedOn(_ e: Event) -> Bool { e.from <= 0.02 && e.to > 0.02 }
     func turnedOff(_ e: Event) -> Bool { e.from > 0.02 && e.to <= 0.02 }
