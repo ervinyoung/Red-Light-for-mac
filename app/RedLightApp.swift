@@ -304,6 +304,7 @@ final class TrueColorWatcher {
     private var lastFront: String?             // the last app in front other than this one (opening the pane activates us)
     private var releaseWork: DispatchWorkItem?
     private var askedNight: Date?              // the evening askedTonight belongs to
+    private var promptFor: String?             // the app the card on screen is asking about
     private let prompt = TrueColorPrompt()
     init(model: Model) {
         m = model
@@ -367,6 +368,9 @@ final class TrueColorWatcher {
             return
         }
         releaseWork?.cancel()
+        // Straight from one colour app to another inside the card's 20 s: the card is about the app you left, and
+        // answering it would do nothing (the hold needs its app in front). Take it down and ask about this one.
+        if prompt.isShowing, promptFor != id { prompt.hide() }
         let name = app.localizedName ?? "This app"
         guard m.enabled, !m.isPaused, m.isTinting || m.heldFor != nil, declinedHere != id else { return }
         let p = policy
@@ -375,7 +379,7 @@ final class TrueColorWatcher {
         if m.heldFor != nil { if m.heldFor != name { m.hold(name) }; return }
         if p.always.contains(id) { m.hold(name); return }
         guard p.ask, !askedTonight.contains(id), !prompt.isShowing else { return }
-        askedTonight.insert(id)
+        askedTonight.insert(id); promptFor = id
         prompt.show(name: name, icon: app.icon ?? NSWorkspace.shared.icon(forFile: app.bundleURL?.path ?? "")) { [weak self] trueColor, rememberIt in
             guard let self = self else { return }
             if rememberIt { self.remember(id, always: trueColor) }
@@ -1110,6 +1114,8 @@ final class Model: ObservableObject {
             // (`location`, `preset save`) would save its whole copy over the change, or this over its. Until it is
             // written, refresh() keeps this model's config rather than reading the old file back.
             configsInFlight += 1
+            diskConfig = config            // what the file will hold for these keys: the next save diffs against it, so a change
+                                           // and its undo before the first lands are two writes, not "no change" beside a stale file
             liveQueue.async { [weak self] in
                 withEngineLock {
                     guard var disk = obj(try? Data(contentsOf: configURL)) else { NSLog("Red Light: config.json unreadable; not saving over it"); return }
@@ -1222,6 +1228,7 @@ final class Model: ObservableObject {
     }
     func startRecording(_ which: String) {
         stopRecording(); recording = which
+        HotKeys.shared.register([])             // while recording, the current shortcuts are keys to capture, not to act on
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] ev in
             guard let self = self else { return ev }
             if ev.keyCode == 53 { self.stopRecording(); return nil }
@@ -1230,7 +1237,8 @@ final class Model: ObservableObject {
             if ev.modifierFlags.contains(.option) { mods.append("option") }
             if ev.modifierFlags.contains(.shift) { mods.append("shift") }
             if ev.modifierFlags.contains(.command) { mods.append("command") }
-            guard !mods.isEmpty else { NSSound.beep(); return nil }
+            // Shift or Option alone would swallow ordinary typing (capitals, ø å ∆) in every app, and macOS won't register them.
+            guard mods.contains("control") || mods.contains("command") else { NSSound.beep(); return nil }
             var hk = self.config.shortcuts ?? Shortcuts()
             let sc = Shortcut(keyCode: Int(ev.keyCode), modifiers: mods)
             switch which { case "toggleShade": hk.toggleShade = sc; case "shadeDown": hk.shadeDown = sc; default: hk.shadeUp = sc }
@@ -1238,7 +1246,10 @@ final class Model: ObservableObject {
             return nil
         }
     }
-    func stopRecording() { if let m = monitor { NSEvent.removeMonitor(m) }; monitor = nil; recording = nil }
+    func stopRecording() {
+        if let m = monitor { NSEvent.removeMonitor(m) }; monitor = nil
+        if recording != nil { recording = nil; registerHotkeys() }
+    }
 
     func parseLive(_ out: String) {
         guard let line = out.components(separatedBy: "\n").first(where: { $0.hasPrefix("current:") }) else { return }
