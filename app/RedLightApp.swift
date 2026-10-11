@@ -520,7 +520,8 @@ enum Setup {
         a.showsSuppressionButton = true
         NSApp.activate()
         let answer = a.runModal()
-        if a.suppressionButton?.state == .on { UserDefaults.standard.set(true, forKey: "dontOfferMove") }
+        // "Don't ask again" belongs to Not Now: ticked beside Move to Applications, a failed copy would otherwise never be offered again.
+        if a.suppressionButton?.state == .on, answer != .alertFirstButtonReturn { UserDefaults.standard.set(true, forKey: "dontOfferMove") }
         guard answer == .alertFirstButtonReturn else { return }
         // Already there and at least as new (an old disk image opened again): start that one rather than downgrade it.
         if there?["CFBundleIdentifier"] as? String == Bundle.main.bundleIdentifier,
