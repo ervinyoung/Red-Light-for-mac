@@ -28,50 +28,54 @@
   *{box-sizing:border-box}
   body{margin:0;background:var(--void);color:var(--snow);font-family:var(--inter);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
   a{color:inherit;text-decoration:none}
-  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 32px}
   h1,h2,h3{font-family:var(--display);margin:0;font-weight:600;letter-spacing:-.015em}
-  .btn{display:inline-flex;align-items:center;gap:9px;height:44px;padding:0 22px;border-radius:999px;font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase;border:1px solid transparent;transition:transform .15s,background .15s;white-space:nowrap}
+  .btn{display:inline-flex;align-items:center;gap:8px;height:48px;padding:0 24px;border-radius:999px;font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase;border:1px solid transparent;transition:transform .15s,background .15s;white-space:nowrap}
   .btn:hover{transform:translateY(-1px)}
   .btn.white{background:var(--red);color:var(--black);box-shadow:0 0 0 6px rgba(255,0,0,.12)}
   .btn.white:hover{background:#ff2a2a}
   .btn.line{border-color:rgba(255,255,255,.28);color:var(--snow)}
   .btn.line:hover{border-color:rgba(255,255,255,.55)}
-  .btn.sm{height:36px;padding:0 16px;font-size:12px}
+  .btn.sm{height:40px;padding:0 16px;font-size:12px}
   .btn svg{width:15px;height:15px}
   nav{position:fixed;inset-inline:0;top:0;z-index:50;background:rgba(0,0,0,.72);backdrop-filter:blur(16px);border-bottom:1px solid var(--edge)}
-  nav .wrap{height:64px;display:flex;align-items:center;justify-content:space-between}
-  .brand{display:inline-flex;align-items:center;gap:10px;font-family:var(--rounded);font-weight:700;font-size:19px;letter-spacing:-.01em}
-  .brand img{width:30px;height:30px;display:block}
-  nav .right{display:flex;gap:10px;align-items:center}
+  nav .wrap{height:72px;display:flex;align-items:center;justify-content:space-between}
+  .brand{display:inline-flex;align-items:center;gap:8px;font-family:var(--rounded);font-weight:700;font-size:19px;letter-spacing:-.01em}
+  .brand img{width:32px;height:32px;display:block}
+  nav .right{display:flex;gap:8px;align-items:center}
 
   /* The field. Deep, dark red with no blue in it, over everything — the nav included. It plays once: scrolling
      opens an iris from the centre, and once it has opened it does not come back. */
   .field{position:fixed;inset:0;z-index:60;overflow:hidden;
     background:radial-gradient(120vmax 90vmax at 50% 50%, var(--red-50) 0%, var(--red-30) 45%, var(--red-8) 100%);
-    -webkit-mask:radial-gradient(circle at var(--cx,50%) var(--cy,50%), transparent var(--hole,0px), #000 calc(var(--hole,0px) + 1px));
-            mask:radial-gradient(circle at var(--cx,50%) var(--cy,50%), transparent var(--hole,0px), #000 calc(var(--hole,0px) + 1px))}
+    /* the opening is the icon's own squircle, cut out of the field and grown from the icon outward */
+    -webkit-mask:url(img/squircle.svg) no-repeat calc(var(--cx,50vw) - var(--hole,0px)) calc(var(--cy,50vh) - var(--hole,0px)) / calc(var(--hole,0px)*2) calc(var(--hole,0px)*2),linear-gradient(#000,#000);
+    -webkit-mask-composite:xor;
+            mask:url(img/squircle.svg) no-repeat calc(var(--cx,50vw) - var(--hole,0px)) calc(var(--cy,50vh) - var(--hole,0px)) / calc(var(--hole,0px)*2) calc(var(--hole,0px)*2),linear-gradient(#000,#000);
+            mask-composite:exclude}
   .field .grain{position:absolute;inset:0;opacity:.12;mix-blend-mode:overlay;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
   /* the icon and wordmark sit above the field, so the opening can grow out from behind the icon */
   .intro{position:fixed;inset:0;z-index:62;pointer-events:none}
   .intro .inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:var(--iconop,1);transform:scale(calc(1 + .05*var(--p,0)))}
-  .intro .icon{width:clamp(96px,12vw,148px);height:auto;margin-bottom:clamp(18px,2.4vw,28px);filter:drop-shadow(0 18px 50px rgba(255,0,0,.35))}
+  .intro .icon{width:clamp(96px,12vw,148px);height:auto;margin-bottom:clamp(24px,2.4vw,32px);filter:drop-shadow(0 18px 50px rgba(255,0,0,.35))}
   .intro .mark{font-family:var(--rounded);font-weight:700;letter-spacing:-.03em;line-height:1;font-size:clamp(56px,9vw,120px);color:var(--red);
     text-shadow:0 0 70px rgba(255,0,0,.35)}
   .field .cue{position:absolute;bottom:34px;left:50%;transform:translateX(-50%);font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--red-80);opacity:var(--textop,1);display:flex;flex-direction:column;align-items:center;gap:10px}
   .field .cue i{width:1px;height:34px;background:linear-gradient(180deg,var(--red),transparent);display:block;animation:drip 2.4s ease-in-out infinite}
   @keyframes drip{0%{transform:scaleY(.2);transform-origin:top;opacity:0}40%{transform:scaleY(1);opacity:1}100%{transform:scaleY(1);opacity:0}}
-  .rim{position:fixed;left:var(--cx,50%);top:var(--cy,50%);width:calc(var(--hole,0px)*2);height:calc(var(--hole,0px)*2);transform:translate(-50%,-50%);border-radius:50%;z-index:61;pointer-events:none;opacity:var(--rimop,0);
-    box-shadow:0 0 0 1.5px rgba(255,90,60,.75),0 0 46px 10px rgba(255,20,0,.55),0 0 120px 40px rgba(255,0,0,.28),inset 0 0 50px 6px rgba(255,30,0,.4)}
+  .rim{position:fixed;left:var(--cx,50%);top:var(--cy,50%);width:calc(var(--hole,0px)*2);height:calc(var(--hole,0px)*2);transform:translate(-50%,-50%);z-index:61;pointer-events:none;opacity:var(--rimop,0);overflow:visible;
+    filter:drop-shadow(0 0 16px rgba(255,20,0,.75)) drop-shadow(0 0 54px rgba(255,0,0,.4))}
+  .rim path{fill:none;stroke:rgba(255,110,80,.85);stroke-width:1.5px;vector-effect:non-scaling-stroke}
   .reveal{position:relative;height:calc(var(--pinh,100vh) + var(--budget,26vh))}
   .reveal.off{height:auto}.reveal.off .hero{position:relative}
-  .hero{position:sticky;top:0;padding:84px 0 0;overflow:hidden;background:var(--void)}
+  .hero{position:sticky;top:0;padding:152px 0 0;overflow:hidden;background:var(--void)}
   .hero h1{font-size:clamp(46px,6.6vw,76px);font-weight:700;line-height:1.02;letter-spacing:-.028em}
   .hero h1 .grad{color:var(--ember)}
-  .hero .sub{font-size:clamp(16px,1.8vw,19px);color:var(--mist);max-width:640px;margin:16px 0 22px;line-height:1.55;letter-spacing:-.005em}
-  .hero .ctas{display:flex;gap:12px;flex-wrap:wrap}
-  .hero .fine{font-size:12.5px;color:var(--ash);margin-top:12px}
-  .shot{position:relative;margin:28px auto 0;max-width:1032px;height:min(52vh,466px);border-radius:18px 18px 0 0;overflow:hidden;border:1px solid rgba(255,255,255,.12);border-bottom:0;filter:url(#hero);
+  .hero .sub{font-size:clamp(16px,1.8vw,19px);color:var(--mist);max-width:640px;margin:24px 0 40px;line-height:1.55;letter-spacing:-.005em}
+  .hero .ctas{display:flex;gap:16px;flex-wrap:wrap}
+  .hero .fine{font-size:12.5px;color:var(--ash);margin-top:16px}
+  .shot{position:relative;margin:80px auto 0;max-width:1032px;height:min(52vh,466px);border-radius:18px 18px 0 0;overflow:hidden;border:1px solid rgba(255,255,255,.12);border-bottom:0;filter:url(#hero);
     box-shadow:0 40px 120px rgba(0,0,0,.65);background:#050000}
   /* the wallpaper: folds of red silk in the dark, so the glass has colour and shape to bend */
   .desk{position:absolute;inset:0;background:#0b0000 url(img/wallpaper.jpg) center top/cover no-repeat}
@@ -93,42 +97,42 @@
     background:radial-gradient(120% 50% at 15% 0%,rgba(255,255,255,.10),rgba(255,255,255,0) 60%)}
   .panel img{position:relative;z-index:1;display:block;width:100%;height:auto}
 
-  section{padding:38px 0 42px;border-top:1px solid var(--edge)}
+  section{padding:96px 0;border-top:1px solid var(--edge)}
   /* peer-reviewed numbers, each linked to its paper */
-  .sci{padding:40px 0 14px;border-top:0}
-  .sci .k{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--red);font-weight:600;margin-bottom:12px}
+  .sci{padding:96px 0;border-top:0}
+  .sci .k{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--red);font-weight:600;margin-bottom:16px}
   .sci h2{font-size:clamp(30px,4.1vw,46px);font-weight:600;line-height:1.04;letter-spacing:-.024em;max-width:820px}
-  .sci .lead{color:var(--grey);font-size:16px;max-width:640px;margin:11px 0 0;line-height:1.55}
-  .wall{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:26px}
-  .wall a{display:flex;flex-direction:column;height:100%;border:1px solid var(--edge);border-radius:18px;padding:20px 20px 16px;background:rgba(255,255,255,.02);transition:border-color .15s,background .15s}
+  .sci .lead{color:var(--grey);font-size:16px;max-width:640px;margin:24px 0 0;line-height:1.55}
+  .wall{display:grid;grid-template-columns:repeat(4,1fr);gap:24px;margin-top:64px}
+  .wall a{display:flex;flex-direction:column;height:100%;border:1px solid var(--edge);border-radius:20px;padding:32px 24px 24px;background:rgba(255,255,255,.02);transition:border-color .15s,background .15s}
   .wall a:hover{border-color:var(--edge-red);background:rgba(255,0,0,.04)}
   .wall .n{font-family:var(--display);font-weight:700;font-size:clamp(40px,4.5vw,56px);line-height:.95;letter-spacing:-.035em;color:var(--white)}
   .wall .n small{font-size:.42em;color:var(--red);margin-left:2px;letter-spacing:-.02em}
-  .wall .f{margin-top:10px;font-size:14.5px;line-height:1.5;color:var(--white);letter-spacing:-.003em}
-  .wall .src{margin-top:auto;padding-top:12px;border-top:1px solid var(--edge);font-size:11.5px;letter-spacing:.04em;color:var(--grey-2);line-height:1.5}
+  .wall .f{margin-top:16px;margin-bottom:24px;font-size:14.5px;line-height:1.5;color:var(--white);letter-spacing:-.003em}
+  .wall .src{margin-top:auto;padding-top:16px;border-top:1px solid var(--edge);font-size:11.5px;letter-spacing:.04em;color:var(--grey-2);line-height:1.5}
   .wall .src b{color:var(--grey);font-weight:600}
-  .pull{margin-top:14px;border:1px solid var(--edge-red);border-radius:18px;padding:20px 22px;display:grid;grid-template-columns:1.4fr 1fr;gap:24px;align-items:center;background:linear-gradient(90deg,rgba(255,0,0,.06),rgba(255,0,0,0))}
+  .pull{margin-top:24px;border:1px solid var(--edge-red);border-radius:20px;padding:40px;display:grid;grid-template-columns:1.4fr 1fr;gap:48px;align-items:center;background:linear-gradient(90deg,rgba(255,0,0,.06),rgba(255,0,0,0))}
   .pull q{font-family:var(--display);font-weight:600;font-size:clamp(18px,2vw,23px);line-height:1.32;letter-spacing:-.016em;quotes:"\201C" "\201D"}
-  .pull .by{font-size:12px;color:var(--grey-2);margin-top:10px}
+  .pull .by{font-size:12px;color:var(--grey-2);margin-top:16px}
   .pull .by a{color:var(--grey)}
-  .pull .ans{font-size:14.5px;color:var(--grey);line-height:1.55;border-left:2px solid var(--red);padding-left:16px}
-  .pull .ans b{color:var(--white);display:block;margin-bottom:4px}
-  .sci .note{font-size:11.5px;color:var(--grey-2);margin-top:14px}
+  .pull .ans{font-size:14.5px;color:var(--grey);line-height:1.55;border-left:2px solid var(--red);padding-left:24px}
+  .pull .ans b{color:var(--white);display:block;margin-bottom:8px}
+  .sci .note{font-size:11.5px;color:var(--grey-2);margin-top:24px}
   /* the native card shows the measurements instead of a second screenshot */
-  .specs{width:100%;max-width:420px;border:1px solid var(--edge);border-radius:16px;padding:4px 14px 2px;background:rgba(255,255,255,.02);margin-bottom:22px}
-  .specs div{display:flex;justify-content:space-between;align-items:center;height:29px;font-size:13px;color:var(--grey);border-top:1px solid var(--edge)}
-  .specs div:first-child{border-top:0;height:33px;font-size:15px;font-weight:700;color:var(--white)}
+  .specs{width:100%;max-width:420px;border:1px solid var(--edge);border-radius:16px;padding:8px 16px;background:rgba(255,255,255,.02);margin-bottom:24px}
+  .specs div{display:flex;justify-content:space-between;align-items:center;height:32px;font-size:13px;color:var(--grey);border-top:1px solid var(--edge)}
+  .specs div:first-child{border-top:0;height:40px;font-size:15px;font-weight:700;color:var(--white)}
   .specs div b{color:var(--white);font-weight:600;font-variant-numeric:tabular-nums}
-  .core{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  .core .card{position:relative;border:1px solid var(--edge);border-radius:20px;padding:24px;min-height:236px;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;background:var(--black)}
+  .core{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  .core .card{position:relative;border:1px solid var(--edge);border-radius:24px;padding:40px;min-height:320px;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;background:var(--black)}
   .core .card .k{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--red);font-weight:600}
-  .core .card h3{font-size:clamp(22px,2.2vw,27px);font-weight:600;margin:8px 0 7px;line-height:1.12;letter-spacing:-.018em}
+  .core .card h3{font-size:clamp(22px,2.2vw,27px);font-weight:600;margin:16px 0 8px;line-height:1.12;letter-spacing:-.018em}
   .core .card p{color:var(--mist);font-size:14.5px;margin:0;line-height:1.5;max-width:440px}
   .core .card .vis{margin-bottom:auto}
   /* 1 · native: the real panel, cropped, in a card that is itself styled like a Control Center row */
-  .core .native{grid-column:1 / -1;flex-direction:row;align-items:flex-end;gap:32px;min-height:0;padding-right:0;padding-top:0}
+  .core .native{grid-column:1 / -1;flex-direction:row;align-items:flex-end;gap:48px;min-height:0;padding-right:0;padding-top:0}
   .core .native .specs{margin-bottom:0}
-  .core .native .txt{flex:1;padding:24px 0 4px}
+  .core .native .txt{flex:1;padding:40px 0 0}
   .core .native .frame{width:303px;height:318px;flex:none;align-self:flex-end;overflow:hidden;border-radius:22px 0 0 0;box-shadow:0 0 0 .5px rgba(255,255,255,.14) inset,-10px 0 40px rgba(0,0,0,.6);margin-top:24px;
     -webkit-mask:linear-gradient(180deg,#000 82%,transparent);mask:linear-gradient(180deg,#000 82%,transparent)}
   .core .native .frame img{display:block;width:303px;height:auto}
@@ -136,22 +140,22 @@
   .ramp{height:56px;border-radius:12px;border:1px solid var(--edge);position:relative;
     background:linear-gradient(90deg,#fff 0%,#ffd6bf 20%,#ff9d8a 40%,#ff3b3b 60%,#ff0000 62%,#b30000 80%,#4d0000 100%)}
   .ramp i{position:absolute;top:-8px;bottom:-8px;left:60%;width:2px;background:#fff;border-radius:2px}
-  .ramp b{position:absolute;left:60%;top:calc(100% + 10px);transform:translateX(-50%);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--white);white-space:nowrap;font-weight:600}
-  .ramp small{position:absolute;top:calc(100% + 10px);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--grey-2)}
+  .ramp b{position:absolute;left:60%;top:calc(100% + 16px);transform:translateX(-50%);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--white);white-space:nowrap;font-weight:600}
+  .ramp small{position:absolute;top:calc(100% + 16px);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--grey-2)}
   .ramp small.l{left:0}.ramp small.r{right:0}
   /* 3 · free */
   .core .free .big{font-family:var(--display);font-weight:700;font-size:clamp(60px,7.2vw,96px);line-height:.9;letter-spacing:-.04em;color:var(--red)}
   /* 4 · sleep */
-  .stats{display:flex;gap:28px}
+  .stats{display:flex;gap:48px}
   .stats .n{font-family:var(--display);font-weight:700;font-size:clamp(36px,4vw,52px);line-height:1;letter-spacing:-.03em;color:var(--white)}
   .stats .n small{font-size:.45em;color:var(--red);margin-left:3px}
-  .stats .l{font-size:12.5px;color:var(--grey-2);margin-top:6px;max-width:160px;line-height:1.45}
-  .cite{font-size:11.5px;color:var(--grey-2);margin-top:13px;line-height:1.5}
-  footer{border-top:1px solid var(--edge);padding:22px 0 26px;color:var(--ash);font-size:13px}
-  footer .wrap{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px}
+  .stats .l{font-size:12.5px;color:var(--grey-2);margin-top:8px;max-width:160px;line-height:1.45}
+  .cite{font-size:11.5px;color:var(--grey-2);margin-top:16px;line-height:1.5}
+  footer{border-top:1px solid var(--edge);padding:48px 0 56px;color:var(--ash);font-size:13px}
+  footer .wrap{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
   footer a{color:var(--mist)}footer a:hover{color:var(--ember)}
   @media (prefers-reduced-motion:reduce){.field,.rim,.intro{display:none}.reveal{height:auto}.hero{position:relative}}
-  @media (max-width:860px){.wall{grid-template-columns:1fr 1fr}.pull{grid-template-columns:1fr}.core{grid-template-columns:1fr}.core .native{flex-direction:column;align-items:flex-start;padding-right:28px}.core .native .frame{width:100%;border-radius:22px}.panel{right:12px;width:270px}.shot{height:400px}.shot .cap{display:none}nav .line{display:none}}
+  @media (max-width:860px){section,.sci{padding:64px 0}.wrap{padding:0 24px}.wall{margin-top:48px}.core .card{padding:32px}.pull{padding:32px;gap:24px}.hero{padding-top:120px}.shot{margin-top:56px}.wall{grid-template-columns:1fr 1fr}.pull{grid-template-columns:1fr}.core{grid-template-columns:1fr}.core .native{flex-direction:column;align-items:flex-start;padding-right:28px}.core .native .frame{width:100%;border-radius:22px}.panel{right:12px;width:270px}.shot{height:400px}.shot .cap{display:none}nav .line{display:none}}
 </style>
 </head>
 <body>
@@ -163,7 +167,7 @@
   <div class="grain"></div>
   <div class="cue"><i></i>Scroll</div>
 </div>
-<div class="rim" id="rim" aria-hidden="true"></div>
+<svg class="rim" id="rim" aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M100.00 50.00 L99.99 58.82 L99.97 62.27 L99.93 64.88 L99.87 67.06 L99.80 68.96 L99.71 70.67 L99.60 72.23 L99.48 73.67 L99.34 75.01 L99.18 76.27 L99.01 77.46 L98.82 78.58 L98.61 79.65 L98.39 80.67 L98.15 81.65 L97.89 82.58 L97.62 83.47 L97.33 84.33 L97.02 85.15 L96.69 85.94 L96.34 86.70 L95.98 87.44 L95.60 88.14 L95.20 88.82 L94.78 89.48 L94.34 90.10 L93.89 90.71 L93.41 91.29 L92.91 91.85 L92.39 92.39 L91.85 92.91 L91.29 93.41 L90.71 93.89 L90.10 94.34 L89.48 94.78 L88.82 95.20 L88.14 95.60 L87.44 95.98 L86.70 96.34 L85.94 96.69 L85.15 97.02 L84.33 97.33 L83.47 97.62 L82.58 97.89 L81.65 98.15 L80.67 98.39 L79.65 98.61 L78.58 98.82 L77.46 99.01 L76.27 99.18 L75.01 99.34 L73.67 99.48 L72.23 99.60 L70.67 99.71 L68.96 99.80 L67.06 99.87 L64.88 99.93 L62.27 99.97 L58.82 99.99 L50.00 100.00 L41.18 99.99 L37.73 99.97 L35.12 99.93 L32.94 99.87 L31.04 99.80 L29.33 99.71 L27.77 99.60 L26.33 99.48 L24.99 99.34 L23.73 99.18 L22.54 99.01 L21.42 98.82 L20.35 98.61 L19.33 98.39 L18.35 98.15 L17.42 97.89 L16.53 97.62 L15.67 97.33 L14.85 97.02 L14.06 96.69 L13.30 96.34 L12.56 95.98 L11.86 95.60 L11.18 95.20 L10.52 94.78 L9.90 94.34 L9.29 93.89 L8.71 93.41 L8.15 92.91 L7.61 92.39 L7.09 91.85 L6.59 91.29 L6.11 90.71 L5.66 90.10 L5.22 89.48 L4.80 88.82 L4.40 88.14 L4.02 87.44 L3.66 86.70 L3.31 85.94 L2.98 85.15 L2.67 84.33 L2.38 83.47 L2.11 82.58 L1.85 81.65 L1.61 80.67 L1.39 79.65 L1.18 78.58 L0.99 77.46 L0.82 76.27 L0.66 75.01 L0.52 73.67 L0.40 72.23 L0.29 70.67 L0.20 68.96 L0.13 67.06 L0.07 64.88 L0.03 62.27 L0.01 58.82 L0.00 50.00 L0.01 41.18 L0.03 37.73 L0.07 35.12 L0.13 32.94 L0.20 31.04 L0.29 29.33 L0.40 27.77 L0.52 26.33 L0.66 24.99 L0.82 23.73 L0.99 22.54 L1.18 21.42 L1.39 20.35 L1.61 19.33 L1.85 18.35 L2.11 17.42 L2.38 16.53 L2.67 15.67 L2.98 14.85 L3.31 14.06 L3.66 13.30 L4.02 12.56 L4.40 11.86 L4.80 11.18 L5.22 10.52 L5.66 9.90 L6.11 9.29 L6.59 8.71 L7.09 8.15 L7.61 7.61 L8.15 7.09 L8.71 6.59 L9.29 6.11 L9.90 5.66 L10.52 5.22 L11.18 4.80 L11.86 4.40 L12.56 4.02 L13.30 3.66 L14.06 3.31 L14.85 2.98 L15.67 2.67 L16.53 2.38 L17.42 2.11 L18.35 1.85 L19.33 1.61 L20.35 1.39 L21.42 1.18 L22.54 0.99 L23.73 0.82 L24.99 0.66 L26.33 0.52 L27.77 0.40 L29.33 0.29 L31.04 0.20 L32.94 0.13 L35.12 0.07 L37.73 0.03 L41.18 0.01 L50.00 0.00 L58.82 0.01 L62.27 0.03 L64.88 0.07 L67.06 0.13 L68.96 0.20 L70.67 0.29 L72.23 0.40 L73.67 0.52 L75.01 0.66 L76.27 0.82 L77.46 0.99 L78.58 1.18 L79.65 1.39 L80.67 1.61 L81.65 1.85 L82.58 2.11 L83.47 2.38 L84.33 2.67 L85.15 2.98 L85.94 3.31 L86.70 3.66 L87.44 4.02 L88.14 4.40 L88.82 4.80 L89.48 5.22 L90.10 5.66 L90.71 6.11 L91.29 6.59 L91.85 7.09 L92.39 7.61 L92.91 8.15 L93.41 8.71 L93.89 9.29 L94.34 9.90 L94.78 10.52 L95.20 11.18 L95.60 11.86 L95.98 12.56 L96.34 13.30 L96.69 14.06 L97.02 14.85 L97.33 15.67 L97.62 16.53 L97.89 17.42 L98.15 18.35 L98.39 19.33 L98.61 20.35 L98.82 21.42 L99.01 22.54 L99.18 23.73 L99.34 24.99 L99.48 26.33 L99.60 27.77 L99.71 29.33 L99.80 31.04 L99.87 32.94 L99.93 35.12 L99.97 37.73 L99.99 41.18 Z"/></svg>
 <div class="intro" id="intro" aria-hidden="true"><div class="inner"><img class="icon" src="img/icon.png" alt="" width="148" height="148"><div class="mark">Red Light</div></div></div>
 
 <nav><div class="wrap">
@@ -226,7 +230,7 @@
   <div class="core">
     <div class="card native">
       <div class="txt"><div class="k">Native</div><h3>It lives in the menu bar, like everything else does.</h3><p>Built from the system's own controls, type and colour: SF Pro at the standard sizes, labelColor and secondaryLabelColor, Liquid Glass. One click from the menu bar, sliders that apply live as you drag. Nothing new to learn, nothing that looks bolted on.</p></div>
-      <div class="specs" style="align-self:flex-end;margin:22px 24px 0 0">
+      <div class="specs" style="align-self:flex-end;margin:40px 40px 0 0">
         <div><span>Measured from Control Center</span><b>at 2×</b></div>
         <div><span>Panel width</span><b>303 pt</b></div>
         <div><span>Row pitch · icon circles</span><b>33 pt · 26 pt</b></div>
@@ -237,7 +241,7 @@
     </div>
     <div class="card">
       <div class="vis"><div class="ramp"><i></i><b>60% · blue at zero</b><small class="l">Off</small><small class="r">100%</small></div></div>
-      <div style="height:22px"></div>
+      <div style="height:40px"></div>
       <div class="k">Red Shift</div><h3>Every blue subpixel, off. Slowly.</h3><p>Night Shift warms. Red Light removes: at 60% the blue channel sits at zero at the display's own transfer table, and text stays crisp. It walks there across a thirty-minute fade from sunset, in steps too small to catch.</p>
     </div>
     <div class="card free">
@@ -250,7 +254,7 @@
         <div><div class="n">4</div><div class="l">presets for what you actually do after dark</div></div>
         <div><div class="n">3</div><div class="l">nights of the same choice before it becomes your default</div></div>
       </div>
-      <div style="height:20px"></div>
+      <div style="height:40px"></div>
       <div class="k">Smart</div><h3>It learns your night, then runs it for you.</h3><p>Dusk to ease in, Night to settle, Movie to drop the whole screen back, Deep night for the last hour &mdash; each one moves the display, the keyboard and the screen shade together. Settle on the same thing three nights out of fourteen and it quietly becomes your default, sunset time included. It never fights a change in the moment. It just stops needing to be told.</p>
       <div class="cite">Two weeks of it and read your own deep sleep and latency. n = 1, like everything that works.</div>
     </div>
@@ -281,10 +285,12 @@
   function update(){
     ticking=false; if(done) return;
     var raw=Math.max(0,Math.min(1,window.scrollY/BUDGET())), p=ease(raw);
-    // The opening is centred on the icon and starts just inside its edge, so it emerges from behind it,
+    // The opening is the icon's own outline: it starts exactly on the icon's edge and grows out of it,
     // then grows until it clears the farthest corner of the window.
     var b=icon.getBoundingClientRect(), cx=b.left+b.width/2, cy=b.top+b.height/2, W=window.innerWidth, H=window.innerHeight;
-    var far=Math.max(Math.hypot(cx,cy),Math.hypot(W-cx,cy),Math.hypot(cx,H-cy),Math.hypot(W-cx,H-cy))+40, r0=b.width*0.42;
+    // half-size of the icon's squircle (superellipse, n = 4.2) that just covers a point dx, dy from its centre
+    function cover(dx,dy){ return Math.pow(Math.pow(Math.abs(dx),4.2)+Math.pow(Math.abs(dy),4.2),1/4.2); }
+    var far=Math.max(cover(cx,cy),cover(W-cx,cy),cover(cx,H-cy),cover(W-cx,H-cy))+48, r0=b.width/2;
     var r=raw<=0?0:r0+p*(far-r0);
     root.style.setProperty('--cx',cx.toFixed(1)+'px'); root.style.setProperty('--cy',cy.toFixed(1)+'px');
     root.style.setProperty('--p',p.toFixed(4)); root.style.setProperty('--hole',r.toFixed(1)+'px');
