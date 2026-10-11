@@ -791,10 +791,14 @@ case "pause":
     saveState(st); log("paused until \(fmt.string(from: until))"); print("paused until \(fmt.string(from: until))")
 case "resume":
     var st = loadState() ?? blank()
+    let wasHeld = st.heldFor != nil, customHeld = st.customTintHeld == true
     st.pausedUntil = nil; st.disabled = false; st.heldFor = nil; st.customTintHeld = nil; st.forcedAt = nil
     let want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
     if st.mode != want { st = startTransition(to: want, cfg: cfg, learned: learned, state: st, now: now, fade: 0) }
-    else { st.lastSeen = readCurrent() }        // as when a pause runs out: changes made while paused aren't learned
+    else {
+        if wasHeld { restoreTint(custom: customHeld) }      // the hold is ended here too: nothing else would bring the tint back
+        st.lastSeen = readCurrent()                         // as when a pause runs out: changes made while paused aren't learned
+    }
     saveState(st); log("resumed"); print("resumed (\(want))")
 case "location":
     // redlight location <lat> <lon> [auto|manual]
