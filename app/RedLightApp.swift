@@ -1097,6 +1097,8 @@ final class Model: ObservableObject {
             // (`location`, `preset save`) would save its whole copy over the change, or this over its. Until it is
             // written, refresh() keeps this model's config rather than reading the old file back.
             configsInFlight += 1
+            diskConfig = config            // what the file will hold for these keys: the next save diffs against it, so a change
+                                           // and its undo before the first lands are two writes, not "no change" beside a stale file
             liveQueue.async { [weak self] in
                 withEngineLock {
                     guard var disk = obj(try? Data(contentsOf: configURL)) else { NSLog("Red Light: config.json unreadable; not saving over it"); return }
