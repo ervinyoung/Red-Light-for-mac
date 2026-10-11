@@ -166,10 +166,12 @@ fades the keys off. Red Light adds four named levels below macOS's minimum:
 | Candlelight | 9 | 1/6 |
 | Firelight | 21 | 2/5 |
 
-To hold one of these levels, the menu bar app keeps restarting a slow fade before it can move a step. While it
-holds, macOS's own idle-off is paused, and Red Light turns the keys off itself after your **Turn Off After
-Inactivity** time, and back on as soon as you type, move the pointer, click, or scroll, so you can find the keys
-at night without pressing one. The named levels work only while the app is open. If you change the brightness
+To hold one of these levels, the menu bar app keeps restarting a slow fade before it can move a step.
+
+Whenever Red Light sets the keyboard (auto-brightness off), it also runs the idle-off instead of macOS, at every
+level: the keys turn off after your **Turn Off After Inactivity** time, and back on as soon as you type, move the
+pointer, click, or scroll, so you can find the keys at night without pressing one. (macOS's own idle-off counts
+typing only, and once it has dimmed the keys it ignores brightness changes.) The named levels work only while the app is open. If you change the brightness
 with the keyboard's brightness keys or Control Center, Red Light releases the backlight at the new level.
 
 The left half of the **Keyboard Backlight** slider holds **Off** and the four named levels, and snaps to them. The

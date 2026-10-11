@@ -197,14 +197,17 @@ func kbGetBool(_ sel: String, _ id: UInt64) -> Bool { let (imp, s) = kbImp(sel);
 func readCurrent() -> Settings {
     var s = Settings(filterEnabled: maGetEnabled(colorCategory), filterType: maGetType(colorCategory), hue: maGetHue(), intensity: maGetInten())
     if let id = kbIDs().first {
-        let dimmed = kbGetBool("isBacklightDimmedOnKeyboard:", id) || kbGetBool("isBacklightSuppressedOnKeyboard:", id)
+        // The menu bar app runs idle-off itself while it sets the keys, and marks it: dark keys then aren't a change.
+        let appIdle = FileManager.default.fileExists(atPath: appDir.appendingPathComponent("keyboard-idle").path)
+        let dimmed = kbGetBool("isBacklightDimmedOnKeyboard:", id) || kbGetBool("isBacklightSuppressedOnKeyboard:", id) || appIdle
         s.keyboardAutoBrightness = kbGetBool("isAutoBrightnessEnabledForKeyboard:", id)
         s.keyboardIdleDimSeconds = kbGetDouble("idleDimTimeForKeyboard:", id)
         if !dimmed && s.keyboardAutoBrightness == false {
             let v = Double(kbGetFloat("brightnessForKeyboard:", id))
             let known = loadCommanded().keyboardBrightness
-            // While the app holds an extra-dim level, the system reads 0 or its minimum: that is the hold, not a change.
-            if isExtraDim(known) && v <= kbFloor + 0.0001 { s.keyboardBrightness = known }
+            // An extra-dim level is the app's to hold, and on the way there the keys still show the old level: the
+            // record stands. (The brightness keys during a hold are reported by the app itself.)
+            if isExtraDim(known) { s.keyboardBrightness = known }
             else {
                 s.keyboardBrightness = v
                 if known == nil || abs(known! - v) > 0.0005 { saveCommanded(Commanded(keyboardBrightness: v)) }
