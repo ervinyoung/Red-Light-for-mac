@@ -460,6 +460,7 @@ func median(_ xs: [Double]) -> Double { let s = xs.sorted(); return s.count % 2 
 func learn(cfg: Config, learned: Learned, state: inout State, now: Date) -> Learned {
     let L = cfg.learning ?? Learning()
     guard L.enabled else { return learned }
+    let minNights = max(1, L.minNights)     // a hand-edited 0 let an empty set through to median(), which trapped on every check
     var new = learned
     let events = loadEvents(since: now.addingTimeInterval(-Double(L.lookbackDays) * 86400))
     guard !events.isEmpty else { return learned }
@@ -471,9 +472,9 @@ func learn(cfg: Config, learned: Learned, state: inout State, now: Date) -> Lear
         for e in events where e.field == field && e.mode == "night" && e.t >= (learned.levelsSince ?? .distantPast)
                                && !(field == "warmth" && e.to <= 0.02) { lastPerNight[e.nightID] = e.to }
         let vals = Array(lastPerNight.values)
-        guard vals.count >= L.minNights else { return nil }
+        guard vals.count >= minNights else { return nil }
         let m = median(vals)
-        return vals.filter { abs($0 - m) <= tol }.count >= L.minNights ? m : nil
+        return vals.filter { abs($0 - m) <= tol }.count >= minNights ? m : nil
     }
     if let v = settledNightValue("warmth", tol: 0.1) {
         let cur = learned.nightWarmth ?? cfg.night.warmth ?? 0
@@ -496,9 +497,9 @@ func learn(cfg: Config, learned: Learned, state: inout State, now: Date) -> Lear
         var perNight: [String: Double] = [:]
         for e in events where e.field == "warmth" || e.field == "filterEnabled" { if let o = pred(e) { perNight[e.nightID] = o } }
         let vals = Array(perNight.values)
-        guard vals.count >= L.minNights else { return nil }
+        guard vals.count >= minNights else { return nil }
         let m = median(vals)
-        return vals.filter { abs($0 - m) <= 30 }.count >= L.minNights ? m : nil
+        return vals.filter { abs($0 - m) <= 30 }.count >= minNights ? m : nil
     }
     func turnedOn(_ e: Event) -> Bool { e.from <= 0.02 && e.to > 0.02 }
     func turnedOff(_ e: Event) -> Bool { e.from > 0.02 && e.to <= 0.02 }
@@ -800,10 +801,14 @@ case "pause":
     saveState(st); log("paused until \(fmt.string(from: until))"); print("paused until \(fmt.string(from: until))")
 case "resume":
     var st = loadState() ?? blank()
+    let wasHeld = st.heldFor != nil, customHeld = st.customTintHeld == true
     st.pausedUntil = nil; st.disabled = false; st.heldFor = nil; st.customTintHeld = nil; st.forcedAt = nil
     let want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
     if st.mode != want { st = startTransition(to: want, cfg: cfg, learned: learned, state: st, now: now, fade: 0) }
-    else { st.lastSeen = readCurrent() }        // as when a pause runs out: changes made while paused aren't learned
+    else {
+        if wasHeld { restoreTint(custom: customHeld) }      // the hold is ended here too: nothing else would bring the tint back
+        st.lastSeen = readCurrent()                         // as when a pause runs out: changes made while paused aren't learned
+    }
     saveState(st); log("resumed"); print("resumed (\(want))")
 case "location":
     // redlight location <lat> <lon> [auto|manual]
@@ -864,8 +869,10 @@ case "preset":
         cur.filterType = nil; cur.hue = nil; cur.keyboardAutoBrightness = nil; cur.filterEnabled = nil; cur.intensity = nil
         if cur.keyboardBrightness == nil { cur.keyboardBrightness = cfg.night.keyboardBrightness }
         let icon = CommandLine.arguments.count > 4 ? CommandLine.arguments[4] : "star.fill"
+        // Replacing keeps the preset where it was in the list (the pane and the slider marks follow that order).
+        let at = presets.firstIndex { $0.name.lowercased() == name.lowercased() } ?? presets.count
         presets.removeAll { $0.name.lowercased() == name.lowercased() }
-        presets.append(Preset(name: name, icon: icon, settings: cur))
+        presets.insert(Preset(name: name, icon: icon, settings: cur), at: min(at, presets.count))
         c.presets = presets
         if c.nightPresetName?.lowercased() == name.lowercased() { c.nightPresetName = nil }
         saveConfig(c); print("saved preset \(name): \(describe(cur))")
