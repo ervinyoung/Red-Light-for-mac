@@ -143,7 +143,16 @@
   .ramp b{position:absolute;left:60%;top:calc(100% + 16px);transform:translateX(-50%);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--white);white-space:nowrap;font-weight:600}
   .ramp small{position:absolute;top:calc(100% + 16px);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--grey-2)}
   .ramp small.l{left:0}.ramp small.r{right:0}
-  /* 3 · free */
+  /* 3 · room light: three rooms, darker to the right, each with its screen as Red Light draws it there */
+  .rooms{display:flex;gap:16px}
+  .rooms div{flex:1;min-width:0}
+  .rooms i{display:block;height:72px;border-radius:12px;border:1px solid var(--edge);background:var(--room);position:relative}
+  .rooms i::after{content:"";position:absolute;inset:18px 24%;border-radius:4px;background:var(--scr);box-shadow:0 0 24px var(--halo)}
+  .rooms b{display:block;margin-top:16px;font-family:var(--display);font-size:22px;font-weight:700;line-height:1;letter-spacing:-.02em;color:var(--white)}
+  .rooms small{display:block;margin-top:8px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--grey-2)}
+  /* 4 · free, as one low row */
+  .core .free{grid-column:1 / -1;flex-direction:row;justify-content:flex-start;align-items:center;gap:48px;min-height:0}
+  .core .free .vis{margin-bottom:0}
   .core .free .big{font-family:var(--display);font-weight:700;font-size:clamp(60px,7.2vw,96px);line-height:.9;letter-spacing:-.04em;color:var(--red)}
   /* 4 · sleep */
   .stats{display:flex;gap:48px}
@@ -155,7 +164,7 @@
   footer .wrap{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
   footer a{color:var(--mist)}footer a:hover{color:var(--ember)}
   @media (prefers-reduced-motion:reduce){.field,.rim,.intro{display:none}.reveal{height:auto}.hero{position:relative}}
-  @media (max-width:860px){section,.sci{padding:64px 0}.wrap{padding:0 24px}.wall{margin-top:48px}.core .card{padding:32px}.pull{padding:32px;gap:24px}.hero{padding-top:120px}.shot{margin-top:56px}.wall{grid-template-columns:1fr 1fr}.pull{grid-template-columns:1fr}.core{grid-template-columns:1fr}.core .native{flex-direction:column;align-items:flex-start;padding-right:28px}.core .native .frame{width:100%;border-radius:22px}.panel{right:12px;width:270px}.shot{height:400px}.shot .cap{display:none}nav .line{display:none}}
+  @media (max-width:860px){section,.sci{padding:64px 0}.wrap{padding:0 24px}.wall{margin-top:48px}.core .card{padding:32px}.pull{padding:32px;gap:24px}.hero{padding-top:120px}.shot{margin-top:56px}.wall{grid-template-columns:1fr 1fr}.pull{grid-template-columns:1fr}.core{grid-template-columns:1fr}.core .native{flex-direction:column;align-items:flex-start;padding-right:28px}.core .native .frame{width:100%;border-radius:22px}.core .free{flex-direction:column;align-items:flex-start;gap:24px}.panel{right:12px;width:270px}.shot{height:400px}.shot .cap{display:none}nav .line{display:none}}
 </style>
 </head>
 <body>
@@ -244,9 +253,14 @@
       <div style="height:40px"></div>
       <div class="k">Red Shift</div><h3>Every blue subpixel, off. Slowly.</h3><p>Night Shift warms. Red Light removes: at 60% the blue channel sits at zero at the display's own transfer table, and text stays crisp. It walks there across a thirty-minute fade from sunset, in steps too small to catch.</p>
     </div>
-    <div class="card free">
-      <div class="vis"><div class="big">$0</div></div>
-      <div class="k">Free</div><h3>No account. No subscription. No telemetry.</h3><p>MIT licensed, so audit every line. Location is read on the Mac for sunrise and sunset and never leaves it.</p>
+    <div class="card">
+      <div class="vis rooms">
+        <div><i style="--room:linear-gradient(180deg,#3b3835,#24221f);--scr:#ffffff;--halo:rgba(255,255,255,.35)"></i><b>Off</b><small>Lit room</small></div>
+        <div><i style="--room:radial-gradient(90px 70px at 85% 0%,#2a1d14,#0d0b0a);--scr:#ffcfb6;--halo:rgba(255,190,160,.35)"></i><b>22%</b><small>Dim lamp</small></div>
+        <div><i style="--room:#000;--scr:#ff3b3b;--halo:rgba(255,0,0,.45)"></i><b>60%</b><small>Dark</small></div>
+      </div>
+      <div style="height:40px"></div>
+      <div class="k">Room light</div><h3>The darker the room, the redder the screen.</h3><p>At night, Red Light reads your Mac's ambient light sensor. A lit room gets no red at all. As the lamps go off, Red Shift rises with them, easing in over half a minute. Nudge it on a few nights and it learns how you like your room.</p>
     </div>
     <div class="card" style="grid-column:1 / -1">
       <div class="vis stats">
@@ -257,6 +271,10 @@
       <div style="height:40px"></div>
       <div class="k">Smart</div><h3>It learns your night, then runs it for you.</h3><p>Dusk to ease in, Night to settle, Movie to drop the whole screen back, Deep night for the last hour &mdash; each one moves the display, the keyboard and the screen shade together. Settle on the same thing three nights out of fourteen and it quietly becomes your default, sunset time included. It never fights a change in the moment. It just stops needing to be told.</p>
       <div class="cite">Two weeks of it and read your own deep sleep and latency. n = 1, like everything that works.</div>
+    </div>
+    <div class="card free">
+      <div class="vis"><div class="big">$0</div></div>
+      <div><div class="k">Free</div><h3>No account. No subscription. No telemetry.</h3><p>MIT licensed, so audit every line. Location is read on the Mac for sunrise and sunset and never leaves it.</p></div>
     </div>
   </div>
 </div></section>
