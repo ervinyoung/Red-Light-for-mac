@@ -1939,13 +1939,6 @@ struct SettingsPage: View {
             TextRow(text: "Figma, Sketch, Photoshop, Lightroom, video editors and other design and photo apps can show true color while they are in front. Red Light comes back when you switch away.", secondary: true)
             Line()
 
-            Header(text: "Keyboard Shortcuts")
-            shortcutRow("Toggle Shade", "toggleShade", (m.config.shortcuts ?? Shortcuts()).toggleShade)
-            shortcutRow("Shade Darker", "shadeUp", (m.config.shortcuts ?? Shortcuts()).shadeUp)
-            shortcutRow("Shade Lighter", "shadeDown", (m.config.shortcuts ?? Shortcuts()).shadeDown)
-            if m.recording != nil { TextRow(text: "Press a key combination. Esc cancels.", secondary: true) }
-            SectionEnd()
-
             UpdatesSection(u: m.updater, drawn: m.snapshotMode)
 
             Header(text: "General")
@@ -1964,11 +1957,6 @@ struct SettingsPage: View {
     var locationLabel: String {
         let c = String(format: "%.2f, %.2f", m.config.latitude, m.config.longitude)
         switch m.config.locationSource { case "auto": return "\(c) · from this Mac"; case "manual": return "\(c) · manual"; default: return "\(c) · guessed from time zone" }
-    }
-    func shortcutRow(_ label: String, _ key: String, _ sc: Shortcut) -> some View {
-        HStack { Text(label).font(CC.row).foregroundStyle(CC.label); Spacer()
-            PillButton(title: m.recording == key ? "Recording…" : describe(sc), drawn: m.snapshotMode) { m.recording == key ? m.stopRecording() : m.startRecording(key) }
-        }.frame(height: 32)
     }
 }
 

@@ -220,6 +220,8 @@ To control the screen shade from any app, use the following keyboard shortcuts:
 - To turn the shade on or off, press Control-Option-Command-S.
 - To make the shade darker or lighter, press Control-Option-Command-Up Arrow or Control-Option-Command-Down Arrow.
 
+To change these shortcuts, edit `shortcuts` in `config.json`.
+
 The switch at the top right of the panel works like the Wi-Fi switch. When it's off, Red Light restores your
 normal display and does nothing at sunset. When it's on, Red Light follows the sun again and ends any pause.
 During the day, the panel shows a **Waiting for sunset** row with the start time, and a **Turn On Now** row that
