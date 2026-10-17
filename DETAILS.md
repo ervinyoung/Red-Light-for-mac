@@ -71,7 +71,7 @@ The following table lists the commands:
 | `redlight pause sunrise` | Pause until the next sunrise. |
 | `redlight resume` | End a pause and turn the switch on. |
 | `redlight set warmth 80` | Set Red Shift from 0 to 100, or `off`. For details, see [Red Shift](#red-shift). |
-| `redlight set keyboard 30` | Set the keyboard backlight in percent of macOS's range, from 0.1 to 100, or `off`. Use `dim1` to `dim4` for Starlight, Moonlight, Candlelight, and Firelight. |
+| `redlight set keyboard 30` | Set the keyboard backlight in percent of macOS's range, from 0.1 to 100, or `off`. Use `dim1` to `dim4` for Extra Dim 1 to 4. |
 | `redlight set idle 30` | Turn the keyboard backlight off after the given number of seconds of inactivity. |
 | `redlight set shade 40` | Set the screen shade from 0 to 90, or `off`. |
 | `redlight preset list` | List presets. Other subcommands are `apply "Night"`, `save "Reading" book.fill`, `night "Night"`, and `delete "Reading"`. |
@@ -181,14 +181,14 @@ Red Light stores its files in `~/Library/Application Support/RedLight`:
 
 The keyboard backlight is driven by a PWM signal with a 960-step cycle. macOS's levels run from 54 steps (its
 minimum) to 336 (full), but the hardware can go down to 1 step: macOS only passes through those levels while it
-fades the keys off. Red Light adds four named levels below macOS's minimum:
+fades the keys off. Red Light adds four levels below macOS's minimum, Extra Dim 1 (the dimmest) to Extra Dim 4:
 
 | Level | Steps | Share of macOS's minimum |
 | --- | --- | --- |
-| Starlight | 2 | 1/27 |
-| Moonlight | 4 | 1/14 |
-| Candlelight | 9 | 1/6 |
-| Firelight | 21 | 2/5 |
+| Extra Dim 1 | 2 | 1/27 |
+| Extra Dim 2 | 4 | 1/14 |
+| Extra Dim 3 | 9 | 1/6 |
+| Extra Dim 4 | 21 | 2/5 |
 
 To hold one of these levels, the menu bar app keeps restarting a slow fade before it can move a step.
 

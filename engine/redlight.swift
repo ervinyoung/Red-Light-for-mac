@@ -460,8 +460,8 @@ func observe(cfg: Config, learned: Learned, state: State, now: Date) -> (State, 
     // The tint leg follows warmth across 60 %: easing red from 80 % to 50 % is one change, not also "switched the
     // filter off" — which the timing rules would read as turning red light off and move sunrise or sunset.
     if prev.warmth == cur.warmth { changed("filterEnabled", prev.filterEnabled.map { $0 ? 1 : 0 }, cur.filterEnabled.map { $0 ? 1 : 0 }, tol: 0.5) }
-    // Below macOS's minimum every level is within 0.001 of the next, so a hand-set Starlight, Moonlight, Candlelight or
-    // Firelight (or off) is told by its ticks as well: a fade used to carry on over it.
+    // Below macOS's minimum every level is within 0.001 of the next, so a hand-set Extra Dim level (or off) is told
+    // by its ticks as well: a fade used to carry on over it.
     changed("keyboardBrightness", prev.keyboardBrightness, cur.keyboardBrightness, tol: 0.005,
             differ: { abs($0 - $1) > 0.005 || abs(kbTicksOf($0) - kbTicksOf($1)) > 1.5 })
     // Under auto-brightness the level isn't read, so a keyboard slider (auto off) or the system's own switch (auto on)

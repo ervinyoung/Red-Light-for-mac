@@ -794,7 +794,7 @@ func kbValue(_ ticks: Double) -> Double {
     return ticks < kbMinTicks + 1 ? 0.001 : min(1, (ticks - 51.5) / 284.5)
 }
 /// The four levels below macOS's minimum are named, dimmest first, after light you would still read by at night.
-let kbDimNames = ["Starlight", "Moonlight", "Candlelight", "Firelight"]
+let kbDimNames = ["Extra Dim 1", "Extra Dim 2", "Extra Dim 3", "Extra Dim 4"]     // dimmest first, as `set keyboard dim1`–`dim4`
 /// Off, a named extra-dim level, or a percentage of macOS's own range, where 1% is its minimum and 100% is full.
 func fmtKeyboard(_ v: Double?) -> String {
     let t = kbTicks(v); guard t > 0 else { return "Off" }
