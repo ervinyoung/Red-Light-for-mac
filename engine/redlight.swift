@@ -80,16 +80,15 @@ struct Learning: Codable {
     }
 }
 struct Preset: Codable { var name: String; var icon: String; var settings: Settings }
-/// Deepen the red in a dark room: a pitch-dark room takes Red Shift `strength` of the way to 100 % (1 was too red at
-/// night). Lenient, like `Learning`.
+/// Let the room's light set Red Shift at night (see `roomCurve`); `strength` scales the room's level. Lenient, like `Learning`.
 struct RoomLight: Codable {
     var enabled = true
-    var strength = 0.6
+    var strength = 1.0
     init() {}
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? true
-        strength = max(0, min(1, (try? c.decode(Double.self, forKey: .strength)) ?? 0.6))
+        strength = max(0, min(1, (try? c.decode(Double.self, forKey: .strength)) ?? 1))
     }
 }
 struct Config: Codable {
@@ -714,54 +713,68 @@ func roomLux() -> Double? {
           let e = hidCopyEvent(s, 12, 0, 0)?.takeRetainedValue() else { return nil }
     return hidFloat(e, 12 << 16)
 }
-/// 0 in a lit room, 1 in a dark one, on a log scale: from 150 lux (a lit living room) down to 2 (a lamp off, the
-/// screen the only light), eased at both ends.
-func darkness(lux: Double) -> Double {
-    let t = max(0, min(1, (log10(150) - log10(max(0, lux) + 1)) / (log10(150) - log10(3))))
-    return t * t * (3 - 2 * t)
+/// The Red Shift a room calls for at night, on a log scale through (lux, warmth): bright as 20 lux or more, off; 10 lux
+/// (a dim lamp across the room), 22 %; 2 lux, 45 %; pitch dark, 60 %. Tuned by hand: 81 % at 9 lux was too red.
+func roomCurve(lux: Double) -> Double {
+    let pts: [(Double, Double)] = [(20, 0), (10, 0.22), (2, 0.45), (0, 0.6)]
+    let x = log10(max(0, lux) + 1)
+    if x >= log10(pts[0].0 + 1) { return 0 }
+    for i in 1..<pts.count {
+        let (l0, w0) = pts[i - 1], (l1, w1) = pts[i], x0 = log10(l0 + 1), x1 = log10(l1 + 1)
+        if x >= x1 { return w0 + (w1 - w0) * (x0 - x) / (x0 - x1) }
+    }
+    return pts.last!.1
 }
-var roomDarkness = 0.0, roomStrength = 0.0, roomNightness = 0.0
-func setRoomContext(cfg: Config, state: State?, now: Date) {
+/// The room's level (eased, see `senseRoom`), and whether there is a room to go by: no sensor reading means the
+/// schedule's own level, as without this feature — never off because the lid is closed.
+var roomLevel = 0.0, roomActive = false, roomStrength = 0.0, roomNightness = 0.0, roomNightWarmth = 0.8
+func setRoomContext(cfg: Config, learned: Learned, state: State?, now: Date) {
     let r = cfg.roomLight ?? RoomLight()
     roomStrength = r.enabled ? r.strength : 0
-    roomDarkness = roomStrength > 0 ? (state?.room?.darkness ?? 0) : 0
+    roomActive = roomStrength > 0 && (state?.room.map { $0.lux >= 0 } ?? false)
+    roomLevel = state?.room?.darkness ?? 0
     roomNightness = nightness(state, now: now)
+    roomNightWarmth = max(0.05, nightPreset(cfg: cfg, learned: learned).warmth ?? 0.8)
 }
-/// How far into night the schedule is: 0 by day, 1 at night, and the fade's progress in between, so a dark room's
-/// lift rides the sunset fade in and the sunrise fade out rather than jumping at either.
+/// How far into night the schedule is: 0 by day, 1 at night, and the fade's progress in between, so the room's level
+/// rides the sunset fade in and the sunrise fade out rather than jumping at either.
 func nightness(_ st: State?, now: Date) -> Double {
     guard let st = st else { return 0 }
     let t = st.ramp.map { max(0, min(1, now.timeIntervalSince($0.start) / $0.seconds)) }
     switch st.mode { case "night": return t ?? 1; case "day": return t.map { 1 - $0 } ?? 0; default: return 0 }
 }
-/// The warmth drawn for a chosen one: lifted toward 100 % as the room darkens, at night. Nothing at 0 — Red Shift
-/// turned all the way down stays off in any room — and full from 10 % up.
+/// The warmth drawn for a chosen one. At night the room sets the level: the night level draws as the room's, and a
+/// chosen warmth above or below it moves the room's up (by the difference) or down (in proportion, so 0 is off in any
+/// room). The fades scale both, and by day the chosen warmth is drawn as it is.
 func lifted(_ w: Double) -> Double {
     let w = max(0, min(1, w))
-    return w + (1 - w) * roomDarkness * roomStrength * roomNightness * min(1, w / 0.1)
+    guard roomActive, roomNightness > 0 else { return w }
+    let R = roomLevel * roomStrength * roomNightness, B = roomNightWarmth * roomNightness
+    return w >= B ? min(1, R + (w - B)) : R * w / B
 }
 /// The chosen warmth that is drawn as `x` in this room: what the slider sets, so it moves the curve, not the room.
 func unlifted(_ x: Double) -> Double {
-    var lo = 0.0, hi = 1.0
-    for _ in 0..<40 { let mid = (lo + hi) / 2; if lifted(mid) < x { lo = mid } else { hi = mid } }
-    return hi
+    let x = max(0, min(1, x))
+    guard roomActive, roomNightness > 0, x > 0 else { return x }
+    let R = roomLevel * roomStrength * roomNightness, B = roomNightWarmth * roomNightness
+    return x >= R ? min(1, B + (x - R)) : B * x / R
 }
-/// Eases the room's darkness toward what the sensor reads, by at most 1/45 a second: lights going out bring the red in
-/// over about 45 s, and a hand over the sensor is a flicker of a percent. True if the drawn warmth is now out of date.
+/// Eases the room's level toward what the sensor reads, by at most 1 % a second: lights going out bring the red in over
+/// half a minute, and a hand over the sensor is a flicker of a percent. True if the drawn warmth is now out of date.
 func senseRoom(_ st: inout State, now: Date) -> Bool {
-    if roomStrength <= 0 { st.room = nil; roomDarkness = 0 }
-    else {
-        let lux = roomLux(), target = lux.map { darkness(lux: $0) } ?? 0      // no reading: no lift
-        let was = st.room?.darkness ?? 0
-        let step = st.room.map { max(0, now.timeIntervalSince($0.at)) / 45 } ?? 1 / 45
+    let lux = roomStrength > 0 ? roomLux() : nil
+    if let lux = lux {
+        let target = roomCurve(lux: lux)
+        let was = st.room.flatMap { $0.lux >= 0 ? $0.darkness : nil } ?? target      // a first reading starts there
+        let step = st.room.map { max(0, now.timeIntervalSince($0.at)) * 0.01 } ?? 0
         let d = target > was ? min(target, was + step) : max(target, was - step)
-        st.room = Room(lux: lux ?? -1, target: target, darkness: d, at: now)
-        roomDarkness = d
+        st.room = Room(lux: lux, target: target, darkness: d, at: now)
+        roomLevel = d; roomActive = true
         if d == target && abs(was - target) > 0.001 {
             let sh = loadShade()
-            log(String(format: "room at %.0f lux: red shift shown at %.0f%%", lux ?? 0, lifted(sh.base ?? sh.warmth ?? 0) * 100))
+            log(String(format: "room at %.0f lux: red shift shown at %.0f%%", lux, lifted(sh.base ?? sh.warmth ?? 0) * 100))
         }
-    }
+    } else { st.room = nil; roomActive = false }
     let sh = loadShade()
     return abs(lifted(sh.base ?? sh.warmth ?? 0) - (sh.warmth ?? 0)) > 0.003
 }
@@ -793,7 +806,7 @@ var learned = loadLearned()
 let now = Date()
 let fmt = DateFormatter(); fmt.dateStyle = .none; fmt.timeStyle = .short
 let fadeMinutes = cfg.fadeMinutes ?? 30
-setRoomContext(cfg: cfg, state: loadState(), now: now)
+setRoomContext(cfg: cfg, learned: learned, state: loadState(), now: now)
 
 switch cmd {
 case "check":
@@ -816,7 +829,7 @@ case "check":
     st = observed
     pruneEvents(olderThan: now.addingTimeInterval(-Double((cfg.learning ?? Learning()).lookbackDays + 7) * 86400))
     let newLearned = learn(cfg: cfg, learned: learned, state: &st, now: now)
-    if (try? enc.encode(newLearned)) != (try? enc.encode(learned)) { saveLearned(newLearned); learned = newLearned }
+    if (try? enc.encode(newLearned)) != (try? enc.encode(learned)) { saveLearned(newLearned); learned = newLearned; roomNightWarmth = max(0.05, nightPreset(cfg: cfg, learned: learned).warmth ?? 0.8) }
     let roomMoved = senseRoom(&st, now: now)      // before any fade step, which then draws for the room as it is
     var redrawn = false
     var want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"

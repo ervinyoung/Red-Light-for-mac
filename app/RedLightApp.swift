@@ -30,8 +30,8 @@ struct Shortcuts: Codable {
 struct Preset: Codable, Identifiable { var name: String; var icon: String; var settings: Settings; var id: String { name } }
 /// True colour for colour-critical apps: ask, or remember per app (bundle identifiers).
 struct TrueColor: Codable { var ask = true; var always: [String] = []; var never: [String] = [] }
-/// Deepen the red in a dark room (the engine's `lifted`): a pitch-dark room takes Red Shift `strength` of the way to 100 %.
-struct RoomLight: Codable { var enabled = true; var strength = 0.6 }
+/// Let the room's light set Red Shift at night (the engine's `roomCurve` and `lifted`); `strength` scales the room's level.
+struct RoomLight: Codable { var enabled = true; var strength = 1.0 }
 struct Config: Codable {
     var latitude: Double; var longitude: Double; var locationSource: String?; var fadeMinutes: Double?
     var night: Settings; var dayDefaults: Settings
@@ -1128,7 +1128,7 @@ final class Model: ObservableObject {
             if let r = r {
                 switch lux {
                 case let l?: guard abs(log2(l + 1) - log2(max(0, r.lux) + 1)) > 0.25 else { return }   // within a fifth: the same room
-                case nil: guard r.darkness > 0 else { return }       // lid closed: ease any lift away
+                case nil: guard r.lux >= 0 else { return }           // lid closed: back to the schedule's own level
                 }
             } else if lux == nil { return }
         }
@@ -1912,11 +1912,11 @@ struct SettingsPage: View {
                 }.labelsHidden().controlSize(.small).frame(width: 96)
             }.frame(height: 32)
             TextRow(text: m.nightPresetName.map { "Sunset eases into “\($0)”" } ?? "Sunset eases into a custom mix", secondary: true)
-            ToggleRow(label: "Deepen in a Dark Room", isOn: Binding(get: { m.config.roomLight?.enabled ?? true }, set: {
+            ToggleRow(label: "Match Room Light", isOn: Binding(get: { m.config.roomLight?.enabled ?? true }, set: {
                 var r = m.config.roomLight ?? RoomLight(); r.enabled = $0; m.config.roomLight = r
-                m.saveConfig(reapply: false); m.runCLI(["room"])           // queued behind the save: on eases in, off draws your level
+                m.saveConfig(reapply: false); m.runCLI(["room"])           // queued behind the save: on eases to the room, off draws your level
             }), drawn: m.snapshotMode)
-            TextRow(text: "The darker the room, the redder the screen", secondary: true)
+            TextRow(text: "Off in a lit room, redder as it gets darker", secondary: true)
             Line()
 
             Header(text: "Learning")

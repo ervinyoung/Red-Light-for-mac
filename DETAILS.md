@@ -80,7 +80,7 @@ The following table lists the commands:
 | `redlight learned`, `redlight forget` | Show or clear the defaults that Red Light adopted. |
 | `redlight hold Figma` | Show true color while a color-sensitive app is in front. |
 | `redlight release` | Restore the red after a hold. |
-| `redlight room` | Read the light sensor and ease Red Shift toward the room's light. The app runs this while the light changes. |
+| `redlight room` | Read the light sensor and ease Red Shift toward the room's level. The app runs this while the light changes. |
 | `redlight curve` | Print the Red Shift curve. |
 
 While the switch is off, the `pause`, `set`, `preset apply`, and `shade` commands return an error. Turn the
@@ -108,18 +108,28 @@ At 60%, the display shows no blue and no tint. The default at night is 80%. In t
 command line, Red Shift is called `warmth`. The menu bar app draws the gamma table, and the engine sets the
 tint; `shade.json` stores both.
 
-### Dark rooms
+### Room light
 
-At night, Red Light reads your Mac's ambient light sensor and deepens Red Shift as your room gets darker. In a
-lit room (150 lux or more), you see the level you chose. As the light falls to about 2 lux, Red Shift rises
-60% of the way from your level to 100%: from 15% to 66%, for example. A change takes about 45 seconds, so a hand passing over the sensor doesn't flicker the screen.
+At night, Red Light reads your Mac's ambient light sensor and sets Red Shift from your room's light:
 
-The deepening follows the sunset and sunrise fades, so it never jumps at a transition. It's off by day, while
-paused, with the lid closed, and when you turn Red Shift down to 0. The slider shows the level you see. Moving
-it sets the level for the current light, and Red Light learns from your chosen level, not the room's.
+| Room light | Red Shift |
+| --- | --- |
+| 20 lux or more, a lit room | Off |
+| 10 lux, a dim lamp | 22% |
+| 2 lux | 45% |
+| Dark | 60% |
 
-To turn it off, in **Red Light Settings**, turn off **Deepen in a Dark Room**, or set `roomLight.enabled` to
-`false` in `config.json`. To change how much it deepens, set `roomLight.strength` from 0 to 1. The default is 0.6.
+A change eases in at about 1% a second, so a hand passing over the sensor doesn't flicker the screen. The
+level follows the sunset and sunrise fades, so it never jumps at a transition. By day, while paused, and with
+the lid closed, Red Shift is your own level.
+
+The slider shows the level you see. Moving it shifts the room's curve for the rest of the night: above the
+room's level by the difference, and below it in proportion, so 0 is off in any room. Red Light learns from
+these shifts. For example, if you raise the level by 10% on three nights, the curve starts 10% higher.
+
+To turn room light off, in **Red Light Settings**, turn off **Match Room Light**, or set
+`roomLight.enabled` to `false` in `config.json`. To scale the room's levels, set `roomLight.strength` from 0
+to 1. The default is 1.
 
 ## Sunset and sunrise
 
