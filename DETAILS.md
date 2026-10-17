@@ -80,6 +80,7 @@ The following table lists the commands:
 | `redlight learned`, `redlight forget` | Show or clear the defaults that Red Light adopted. |
 | `redlight hold Figma` | Show true color while a color-sensitive app is in front. |
 | `redlight release` | Restore the red after a hold. |
+| `redlight room` | Read the light sensor and ease Red Shift toward the room's light. The app runs this while the light changes. |
 | `redlight curve` | Print the Red Shift curve. |
 
 While the switch is off, the `pause`, `set`, `preset apply`, and `shade` commands return an error. Turn the
@@ -106,6 +107,19 @@ Red Shift uses each method where it works best:
 At 60%, the display shows no blue and no tint. The default at night is 80%. In the configuration and the
 command line, Red Shift is called `warmth`. The menu bar app draws the gamma table, and the engine sets the
 tint; `shade.json` stores both.
+
+### Dark rooms
+
+At night, Red Light reads your Mac's ambient light sensor and deepens Red Shift as your room gets darker. In a
+lit room (150 lux or more), you see the level you chose. As the light falls to about 2 lux, Red Shift rises
+toward 100%. A change takes about 45 seconds, so a hand passing over the sensor doesn't flicker the screen.
+
+The deepening follows the sunset and sunrise fades, so it never jumps at a transition. It's off by day, while
+paused, with the lid closed, and when you turn Red Shift down to 0. The slider shows the level you see. Moving
+it sets the level for the current light, and Red Light learns from your chosen level, not the room's.
+
+To turn it off, in **Red Light Settings**, turn off **Deepen in a Dark Room**, or set `roomLight.enabled` to
+`false` in `config.json`. To deepen it less, set `roomLight.strength` to a value below 1.
 
 ## Sunset and sunrise
 
@@ -144,7 +158,7 @@ Red Light stores its files in `~/Library/Application Support/RedLight`:
 | File | Contents |
 | --- | --- |
 | `config.json` | The night preset, day defaults, location and its source, fade length, learning settings, presets, and shortcuts. |
-| `state.json` | The master switch, mode, day snapshot, current transition, pause, and true-color hold. |
+| `state.json` | The master switch, mode, day snapshot, current transition, pause, true-color hold, and room light. |
 | `learned.json` | Adopted defaults and their history. |
 | `events.jsonl` | Recorded manual changes, removed after the lookback window. |
 | `shade.json` | What the app draws: the screen shade, Red Shift, and gamma multipliers. |

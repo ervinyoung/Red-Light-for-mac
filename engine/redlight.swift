@@ -2,8 +2,9 @@
 // and quietly learns from manual adjustments.
 // Usage: redlight check | night | day | pause <min>|sunrise | resume | set <field> <value> | preset … |
 //        shade … | location <lat> <lon> [auto|manual] | reapply | status | suntimes | learned | forget |
-//        on | off | hold <app> | release | curve
+//        on | off | hold <app> | release | room | curve
 import Foundation
+import IOKit
 
 let appDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/RedLight")
 let configURL  = appDir.appendingPathComponent("config.json")
@@ -46,7 +47,8 @@ struct Settings: Codable {
     var warmth: Double?                 // 0-1, the unified control (see warmthCurve)
 }
 /// Rendered by the menu bar app. `gammaBlue`/`gammaGreen` are channel multipliers derived from `warmth`.
-struct Shade: Codable { var enabled: Bool = false; var level: Double = 0.3; var warmth: Double? = 0; var gammaBlue: Double? = 1; var gammaGreen: Double? = 1 }
+/// `warmth` is what is drawn; `base` what the schedule, a preset or the slider chose, before the room's lift (see `lifted`).
+struct Shade: Codable { var enabled: Bool = false; var level: Double = 0.3; var warmth: Double? = 0; var gammaBlue: Double? = 1; var gammaGreen: Double? = 1; var base: Double? }
 struct Commanded: Codable { var keyboardBrightness: Double? }
 /// macOS's lowest keyboard level is 0.001, which drives the backlight's PWM at 54 of 960 ticks; every value up to about
 /// 0.008 is that same level. The hardware goes down to 1 tick, and the menu bar app holds it there: a value between 0
@@ -78,6 +80,17 @@ struct Learning: Codable {
     }
 }
 struct Preset: Codable { var name: String; var icon: String; var settings: Settings }
+/// Deepen the red in a dark room. `strength` 1 takes a pitch-dark room to 100 %. Lenient, like `Learning`.
+struct RoomLight: Codable {
+    var enabled = true
+    var strength = 1.0
+    init() {}
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? true
+        strength = max(0, min(1, (try? c.decode(Double.self, forKey: .strength)) ?? 1))
+    }
+}
 struct Config: Codable {
     var latitude: Double
     var longitude: Double
@@ -90,6 +103,7 @@ struct Config: Codable {
     var nightPresetName: String?
     var shortcuts: JSONAny?
     var trueColor: JSONAny?             // owned by the app: which colour-critical apps get true colour
+    var roomLight: RoomLight?
 }
 struct JSONAny: Codable {
     let value: Any
@@ -135,7 +149,10 @@ struct State: Codable {
     var customTintHeld: Bool?
     /// When `night`/`day` ("Turn On Now") overrode the schedule. The override stands until the schedule next turns.
     var forcedAt: Date?
+    /// The room as last sensed: `darkness` eases toward `target` (see `senseRoom`). `lux` is -1 with no reading.
+    var room: Room?
 }
+struct Room: Codable { var lux: Double; var target: Double; var darkness: Double; var at: Date }
 struct Learned: Codable {
     var sunsetOffsetMinutes: Double = 0
     var sunriseOffsetMinutes: Double = 0
@@ -220,7 +237,8 @@ func readCurrent() -> Settings {
             s.keyboardBrightness = loadCommanded().keyboardBrightness
         }
     }
-    let sh = loadShade(); s.shadeEnabled = sh.enabled; s.shadeLevel = sh.level; s.warmth = sh.warmth ?? 0
+    // The chosen warmth, not the drawn one: the room's lift is never a change of yours, nor a fade's starting point.
+    let sh = loadShade(); s.shadeEnabled = sh.enabled; s.shadeLevel = sh.level; s.warmth = sh.base ?? sh.warmth ?? 0
     return s
 }
 /// Set while a colour-critical app holds true colour: everything is applied as usual except the tint stays off.
@@ -228,10 +246,10 @@ var holdTint = false
 func apply(_ s: Settings, label: String, quiet: Bool = false) {
     if let w = s.warmth {
         // Warmth owns the color filter. The tint is one leg of the curve; the gamma legs go to the app.
-        let c = warmthCurve(w)
+        let shown = lifted(w), c = warmthCurve(shown)
         maSetType(colorCategory, 16); maSetHue(1.0)
         maSetInten(c.tint); maSetEnabled(colorCategory, !holdTint && c.tint > 0.001)
-        var sh = loadShade(); sh.warmth = w; sh.gammaBlue = c.blue; sh.gammaGreen = c.green
+        var sh = loadShade(); sh.warmth = shown; sh.base = w; sh.gammaBlue = c.blue; sh.gammaGreen = c.green
         if let e = s.shadeEnabled { sh.enabled = e }
         if let l = s.shadeLevel { sh.level = l }
         saveShade(sh)
@@ -254,7 +272,7 @@ func apply(_ s: Settings, label: String, quiet: Bool = false) {
         // next touch, at the level recorded here (a fade step each minute lit them for a moment).
         if let b = s.keyboardBrightness { if !isExtraDim(b) && !(b > 0 && appIdleKeys()) { kbSetBrightness(Float(b), id) }; saveCommanded(Commanded(keyboardBrightness: b)) }
     }
-    if !quiet { log("applied \(label): \(describe(s))") }
+    if !quiet { log("applied \(label): \(describe(s))" + (s.warmth.map { abs(lifted($0) - $0) > 0.005 ? String(format: " (dark room: shown at %.2f)", lifted($0)) : "" } ?? "")) }
 }
 func describe(_ s: Settings) -> String {
     var p: [String] = []
@@ -589,12 +607,13 @@ func startTransition(to mode: String, cfg: Config, learned: Learned, state: Stat
     }
     st.mode = mode
     st.ramp = nil
+    roomNightness = nightness(st, now: now)
     // If we woke up mid-transition, pick the fade up where the clock says it should be.
     let began = since ?? now
     let elapsed = now.timeIntervalSince(began)
     if fade > 0 && elapsed < fade * 60 {
         let ramp = Ramp(start: began, seconds: fade * 60, from: from, to: target, label: mode.uppercased())
-        st.ramp = ramp
+        st.ramp = ramp; roomNightness = nightness(st, now: now)
         let t = elapsed / ramp.seconds
         apply(blend(from, target, t), label: "\(ramp.label) \(Int(t * 100))%")
     } else {
@@ -620,6 +639,7 @@ func pin(_ r: inout Ramp, _ fields: Set<String>, at cur: Settings) {
 func stepRamp(_ st: inout State, now: Date) {
     guard let r = st.ramp else { return }
     let t = now.timeIntervalSince(r.start) / r.seconds
+    roomNightness = nightness(st, now: now)
     if t >= 1 { apply(r.to, label: "\(r.label) 100%"); st.ramp = nil }
     else { apply(blend(r.from, r.to, t), label: "\(r.label) \(Int(t * 100))%", quiet: true) }
     st.lastSeen = readCurrent()
@@ -673,6 +693,84 @@ func refuseIfOff() {
 /// Direct edits (set, preset, reapply) while an app holds true colour change the look underneath; the tint still waits.
 func honourHold() { holdTint = loadState()?.heldFor != nil }
 
+// MARK: - Room light
+// The ambient light sensor: on Apple Silicon an IOHIDEventSystem service (usage page 0xff00, usage 4). Private API.
+@_silgen_name("IOHIDEventSystemClientCreate") func hidClientCreate(_ a: CFAllocator?) -> Unmanaged<AnyObject>?
+@_silgen_name("IOHIDEventSystemClientSetMatching") func hidSetMatching(_ c: AnyObject, _ m: CFDictionary)
+@_silgen_name("IOHIDEventSystemClientCopyServices") func hidCopyServices(_ c: AnyObject) -> Unmanaged<CFArray>?
+@_silgen_name("IOHIDServiceClientCopyEvent") func hidCopyEvent(_ s: AnyObject, _ type: Int64, _ opts: Int32, _ ts: Int64) -> Unmanaged<AnyObject>?
+@_silgen_name("IOHIDEventGetFloatValue") func hidFloat(_ e: AnyObject, _ field: Int32) -> Double
+/// Lux, or nil with no sensor — or with the lid closed, when it sees only the inside of the lid.
+func roomLux() -> Double? {
+    if let v = ProcessInfo.processInfo.environment["REDLIGHT_LUX"] { return Double(v) }     // testing: a room of your choosing
+    let root = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+    let closed = IORegistryEntryCreateCFProperty(root, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Bool
+    IOObjectRelease(root)
+    if closed == true { return nil }
+    guard let c = hidClientCreate(kCFAllocatorDefault)?.takeRetainedValue() else { return nil }
+    hidSetMatching(c, ["PrimaryUsagePage": 0xff00, "PrimaryUsage": 4] as CFDictionary)
+    guard let s = (hidCopyServices(c)?.takeRetainedValue() as? [AnyObject])?.first,
+          let e = hidCopyEvent(s, 12, 0, 0)?.takeRetainedValue() else { return nil }
+    return hidFloat(e, 12 << 16)
+}
+/// 0 in a lit room, 1 in a dark one, on a log scale: from 150 lux (a lit living room) down to 2 (a lamp off, the
+/// screen the only light), eased at both ends.
+func darkness(lux: Double) -> Double {
+    let t = max(0, min(1, (log10(150) - log10(max(0, lux) + 1)) / (log10(150) - log10(3))))
+    return t * t * (3 - 2 * t)
+}
+var roomDarkness = 0.0, roomStrength = 0.0, roomNightness = 0.0
+func setRoomContext(cfg: Config, state: State?, now: Date) {
+    let r = cfg.roomLight ?? RoomLight()
+    roomStrength = r.enabled ? r.strength : 0
+    roomDarkness = roomStrength > 0 ? (state?.room?.darkness ?? 0) : 0
+    roomNightness = nightness(state, now: now)
+}
+/// How far into night the schedule is: 0 by day, 1 at night, and the fade's progress in between, so a dark room's
+/// lift rides the sunset fade in and the sunrise fade out rather than jumping at either.
+func nightness(_ st: State?, now: Date) -> Double {
+    guard let st = st else { return 0 }
+    let t = st.ramp.map { max(0, min(1, now.timeIntervalSince($0.start) / $0.seconds)) }
+    switch st.mode { case "night": return t ?? 1; case "day": return t.map { 1 - $0 } ?? 0; default: return 0 }
+}
+/// The warmth drawn for a chosen one: lifted toward 100 % as the room darkens, at night. Nothing at 0 — Red Shift
+/// turned all the way down stays off in any room — and full from 10 % up.
+func lifted(_ w: Double) -> Double {
+    let w = max(0, min(1, w))
+    return w + (1 - w) * roomDarkness * roomStrength * roomNightness * min(1, w / 0.1)
+}
+/// The chosen warmth that is drawn as `x` in this room: what the slider sets, so it moves the curve, not the room.
+func unlifted(_ x: Double) -> Double {
+    var lo = 0.0, hi = 1.0
+    for _ in 0..<40 { let mid = (lo + hi) / 2; if lifted(mid) < x { lo = mid } else { hi = mid } }
+    return hi
+}
+/// Eases the room's darkness toward what the sensor reads, by at most 1/45 a second: lights going out bring the red in
+/// over about 45 s, and a hand over the sensor is a flicker of a percent. True if the drawn warmth is now out of date.
+func senseRoom(_ st: inout State, now: Date) -> Bool {
+    if roomStrength <= 0 { st.room = nil; roomDarkness = 0 }
+    else {
+        let lux = roomLux(), target = lux.map { darkness(lux: $0) } ?? 0      // no reading: no lift
+        let was = st.room?.darkness ?? 0
+        let step = st.room.map { max(0, now.timeIntervalSince($0.at)) / 45 } ?? 1 / 45
+        let d = target > was ? min(target, was + step) : max(target, was - step)
+        st.room = Room(lux: lux ?? -1, target: target, darkness: d, at: now)
+        roomDarkness = d
+        if d == target && abs(was - target) > 0.001 {
+            let sh = loadShade()
+            log(String(format: "room at %.0f lux: red shift shown at %.0f%%", lux ?? 0, lifted(sh.base ?? sh.warmth ?? 0) * 100))
+        }
+    }
+    let sh = loadShade()
+    return abs(lifted(sh.base ?? sh.warmth ?? 0) - (sh.warmth ?? 0)) > 0.003
+}
+/// Redraws the chosen warmth for the room. The tint leg can switch across 60 %, which is not a change of yours.
+func reliftWarmth(_ st: inout State) {
+    let sh = loadShade(); var s = Settings(); s.warmth = sh.base ?? sh.warmth ?? 0
+    apply(s, label: "ROOM", quiet: true)
+    st.lastSeen?.filterEnabled = maGetEnabled(colorCategory)
+}
+
 // MARK: - Main
 let cmd = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "check"
 // One engine at a time. launchd's minute check, the app's wake check, a slider's `set` and the switch all
@@ -694,6 +792,7 @@ var learned = loadLearned()
 let now = Date()
 let fmt = DateFormatter(); fmt.dateStyle = .none; fmt.timeStyle = .short
 let fadeMinutes = cfg.fadeMinutes ?? 30
+setRoomContext(cfg: cfg, state: loadState(), now: now)
 
 switch cmd {
 case "check":
@@ -717,6 +816,8 @@ case "check":
     pruneEvents(olderThan: now.addingTimeInterval(-Double((cfg.learning ?? Learning()).lookbackDays + 7) * 86400))
     let newLearned = learn(cfg: cfg, learned: learned, state: &st, now: now)
     if (try? enc.encode(newLearned)) != (try? enc.encode(learned)) { saveLearned(newLearned); learned = newLearned }
+    let roomMoved = senseRoom(&st, now: now)      // before any fade step, which then draws for the room as it is
+    var redrawn = false
     var want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
     if let f = st.forcedAt {
         // "Turn On Now" by day (or `day` by night) holds until the next sunset or sunrise, not until the next minute.
@@ -726,6 +827,7 @@ case "check":
     if st.mode != want {
         log("transition \(st.mode) -> \(want)")
         st = startTransition(to: want, cfg: cfg, learned: learned, state: st, now: now, fade: fadeMinutes, since: lastTransition(cfg: cfg, learned: learned, now: now))
+        redrawn = true
     } else if var r = st.ramp {
         if changes.contains("filterEnabled") { log("you switched the tint mid-transition; leaving it as you set it"); st.ramp = nil }
         else {
@@ -735,9 +837,17 @@ case "check":
                 log("you adjusted \(changes.sorted().joined(separator: ", ")) mid-transition; leaving that as you set it")
                 pin(&r, changes, at: cur); st.ramp = r
             }
-            stepRamp(&st, now: now)
+            stepRamp(&st, now: now); redrawn = true
         }
     }
+    if roomMoved && !redrawn { reliftWarmth(&st) }
+    saveState(st)
+case "room":
+    // The app's call while the room's light is changing; the minute check does the same.
+    var st = loadState() ?? blank()
+    if st.disabled == true || (st.pausedUntil.map { now < $0 } ?? false) { exit(0) }
+    holdTint = st.heldFor != nil
+    if senseRoom(&st, now: now) { reliftWarmth(&st) }
     saveState(st)
 case "night", "day":
     var st = loadState()
@@ -832,7 +942,7 @@ case "set":
     refuseIfOff(); honourHold()
     var s = Settings()
     switch field {
-    case "warmth": s.warmth = off ? 0 : max(0, min(1, num / 100))
+    case "warmth": s.warmth = off ? 0 : unlifted(max(0, min(1, num / 100)))     // what you see is what you set
     case "keyboard": s.keyboardAutoBrightness = false; s.keyboardBrightness = off ? 0 : max(0, min(1, num / 100))
     case "idle":
         guard !off, num >= 1 else { print("idle needs a number of seconds (1 or more)"); exit(2) }
@@ -931,7 +1041,11 @@ case "status":
     if let r = st?.ramp { head += "   fading \(Int(min(1, now.timeIntervalSince(r.start) / r.seconds) * 100))%" }
     head += "   switches: day at \(eff.rise.map(fmt.string) ?? "-"), night at \(eff.set.map(fmt.string) ?? "-")"
     print(head)
-    print("current: \(describe(readCurrent()))\(runningApp() ? "" : "   [menu bar app not running: shade and warmth are not applied]")")
+    var cur = readCurrent(); let base = cur.warmth; let sh = loadShade(); cur.warmth = sh.warmth ?? base
+    // `warmth` as drawn (the slider shows it); `planned` the chosen warmth beneath a dark room's lift.
+    let roomNote = (base.map { abs((sh.warmth ?? $0) - $0) > 0.005 ? String(format: " planned=%.2f", $0) : "" } ?? "")
+        + (st?.room.map { $0.lux >= 0 ? String(format: " room=%.0flux", $0.lux) : "" } ?? "")
+    print("current: \(describe(cur))\(roomNote)\(runningApp() ? "" : "   [menu bar app not running: shade and warmth are not applied]")")
     print("night preset: \(describe(nightPreset(cfg: cfg, learned: learned)))")
     if let snap = st?.daySnapshot { print("saved day settings: \(describe(snap))") }
     print(String(format: "location: %.3f, %.3f (%@)   fade: %.0f min", cfg.latitude, cfg.longitude, cfg.locationSource ?? "unknown", fadeMinutes))
@@ -951,5 +1065,5 @@ case "forget":
 case "curve":
     for w in stride(from: 0.0, through: 1.0, by: 0.1) { let c = warmthCurve(w); print(String(format: "warmth %3.0f%%  blue %.2f  green %.2f  tint %.2f", w * 100, c.blue, c.green, c.tint)) }
 default:
-    print("usage: redlight on|off|check|night|day|pause|resume|hold|release|location|set|preset|shade|reapply|status|suntimes|learned|forget|curve"); exit(2)
+    print("usage: redlight on|off|check|night|day|pause|resume|hold|release|location|set|preset|shade|reapply|room|status|suntimes|learned|forget|curve"); exit(2)
 }

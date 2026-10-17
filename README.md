@@ -33,6 +33,7 @@
 
 - **Native.** A Control Center panel in your menu bar.
 - **Gradual.** Blue fades out over 30 minutes after sunset and comes back at sunrise.
+- **Room-aware.** The darker your room, the redder the screen, up to 100%.
 - **Presets.** Dusk, Night, Movie, and Deep night set the display, keyboard, and screen shade at once.
 - **Adaptive.** Settings you choose on 3 of 14 nights become your defaults.
 - **True color.** Figma, Sketch, and Photoshop get accurate color while they're in front.

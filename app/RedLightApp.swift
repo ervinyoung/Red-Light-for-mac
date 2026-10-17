@@ -30,11 +30,13 @@ struct Shortcuts: Codable {
 struct Preset: Codable, Identifiable { var name: String; var icon: String; var settings: Settings; var id: String { name } }
 /// True colour for colour-critical apps: ask, or remember per app (bundle identifiers).
 struct TrueColor: Codable { var ask = true; var always: [String] = []; var never: [String] = [] }
+/// Deepen the red in a dark room (the engine's `lifted`). `strength` 1 takes a pitch-dark room to 100 %.
+struct RoomLight: Codable { var enabled = true; var strength = 1.0 }
 struct Config: Codable {
     var latitude: Double; var longitude: Double; var locationSource: String?; var fadeMinutes: Double?
     var night: Settings; var dayDefaults: Settings
     var learning: Learning?; var shortcuts: Shortcuts?; var presets: [Preset]?; var nightPresetName: String?
-    var trueColor: TrueColor?
+    var trueColor: TrueColor?; var roomLight: RoomLight?
 }
 // A hand-edited block with a key left out (`"trueColor": {"always": [...]}`) must not make the whole file unreadable:
 // the pane would show built-in defaults and refuse to save. What is missing or malformed takes its default.
@@ -55,6 +57,13 @@ extension Shortcuts {
         shadeUp = (try? c.decodeIfPresent(Shortcut.self, forKey: .shadeUp)) ?? shadeUp
     }
 }
+extension RoomLight {
+    init(from d: Decoder) throws {
+        self.init(); guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }
+        enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? enabled
+        strength = (try? c.decodeIfPresent(Double.self, forKey: .strength)) ?? strength
+    }
+}
 extension TrueColor {
     init(from d: Decoder) throws {
         self.init(); guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }
@@ -66,13 +75,16 @@ extension TrueColor {
 struct Ramp: Codable { var start: Date; var seconds: Double; var from: Settings; var to: Settings; var label: String }
 /// Written only by the engine. `disabled` is the master switch; `heldFor` names the app holding true colour.
 struct ModeState: Codable { var mode: String; var daySnapshot: Settings?; var lastSeen: Settings?; var lastNotified: Date?; var ramp: Ramp?; var pausedUntil: Date?
-    var disabled: Bool?; var heldFor: String? }
+    var disabled: Bool?; var heldFor: String?; var room: Room? }
+/// The room as the engine last sensed it: `darkness` eases toward `target`; `lux` is -1 with no reading.
+struct Room: Codable { var lux: Double; var target: Double; var darkness: Double; var at: Date }
 struct Learned: Codable {
     var sunsetOffsetMinutes = 0.0; var sunriseOffsetMinutes = 0.0
     var nightKeyboardBrightness: Double?; var nightIdleDimSeconds: Double?; var nightShadeLevel: Double?; var nightWarmth: Double?
     var history: [String] = []
 }
-struct Shade: Codable { var enabled = false; var level = 0.3; var warmth: Double? = 0; var gammaBlue: Double? = 1; var gammaGreen: Double? = 1 }
+/// `warmth` is what is drawn; `base` the chosen warmth beneath a dark room's lift. Kept through every round trip here.
+struct Shade: Codable { var enabled = false; var level = 0.3; var warmth: Double? = 0; var gammaBlue: Double? = 1; var gammaGreen: Double? = 1; var base: Double? }
 
 /// Same curve as the engine, kept here only so a slider drag can paint the gamma legs without waiting on a process.
 func warmthCurve(_ w: Double) -> (blue: Double, green: Double, tint: Double) {
@@ -800,6 +812,29 @@ func fmtKeyboard(_ v: Double?) -> String {
 /// The named levels below macOS's minimum are held: macOS restarts a fade from wherever the light is and drops a
 /// request whose target equals the running one, so a slow fade toward off, re-aimed and restarted every half second,
 /// long before it can move a tick, keeps the light where it is; a quick fade up corrects the occasional slip.
+/// The ambient light sensor, read in-process (the engine reads it too, and owns what is done with it). Private API:
+/// on Apple Silicon an IOHIDEventSystem service, usage page 0xff00, usage 4. Nil with the lid closed.
+@_silgen_name("IOHIDEventSystemClientCreate") func hidClientCreate(_ a: CFAllocator?) -> Unmanaged<AnyObject>?
+@_silgen_name("IOHIDEventSystemClientSetMatching") func hidSetMatching(_ c: AnyObject, _ m: CFDictionary)
+@_silgen_name("IOHIDEventSystemClientCopyServices") func hidCopyServices(_ c: AnyObject) -> Unmanaged<CFArray>?
+@_silgen_name("IOHIDServiceClientCopyEvent") func hidCopyEvent(_ s: AnyObject, _ type: Int64, _ opts: Int32, _ ts: Int64) -> Unmanaged<AnyObject>?
+@_silgen_name("IOHIDEventGetFloatValue") func hidFloat(_ e: AnyObject, _ field: Int32) -> Double
+final class RoomSensor {
+    private lazy var service: AnyObject? = {
+        guard let c = hidClientCreate(kCFAllocatorDefault)?.takeRetainedValue() else { return nil }
+        hidSetMatching(c, ["PrimaryUsagePage": 0xff00, "PrimaryUsage": 4] as CFDictionary)
+        client = c
+        return (hidCopyServices(c)?.takeRetainedValue() as? [AnyObject])?.first
+    }()
+    private var client: AnyObject?
+    func lux() -> Double? {
+        let root = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+        let closed = IORegistryEntryCreateCFProperty(root, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Bool
+        IOObjectRelease(root)
+        guard closed != true, let s = service, let e = hidCopyEvent(s, 12, 0, 0)?.takeRetainedValue() else { return nil }
+        return hidFloat(e, 12 << 16)
+    }
+}
 final class KeyboardHold {
     enum Want: Equatable { case none, off, level(Double), hold(Int) }      // none: auto-brightness, macOS's to run
     private typealias SetFn = @convention(c) (AnyObject, Selector, Float, Int32, Bool, UInt64) -> Bool
@@ -964,6 +999,7 @@ final class Model: ObservableObject {
     @Published var launchAtLogin = false
     @Published var recording: String? = nil
     @Published var live = Settings()
+    var plannedWarmth: Double?              // the chosen warmth when a dark room lifts what `live.warmth` shows
     @Published var locationDenied = false
     var snapshotMode = isSnapshotRun
     var snapshotDaylight = false      // --snapshot … daylight, to capture the daytime state
@@ -1003,6 +1039,7 @@ final class Model: ObservableObject {
             self.updater.tick(screenIsPlain: self.isOff || !self.isTinting)
         }
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.gamma.verify() }
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.watchRoom() }
         registerHotkeys()
         // Waking up: run a check right away so the lid opening at 11 PM never shows 60 s of daylight look.
         let nc = NSWorkspace.shared.notificationCenter
@@ -1075,6 +1112,31 @@ final class Model: ObservableObject {
         let w = DispatchWorkItem { [weak self] in self?.refresh() }
         refreshWork = w
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: w)
+    }
+    /// The room's light. The engine reads the sensor and eases the red (`redlight room`); this only notices when there
+    /// is something to ease: a sensor read every 3 s in-process, and while the engine is still easing, a `room` a second.
+    private let roomSensor = RoomSensor()
+    private var roomInFlight = false, roomLastRead = Date.distantPast
+    func watchRoom() {
+        guard !roomInFlight, !isOff, !isPaused, config.roomLight?.enabled ?? true else { return }
+        guard isNight || isFading || (shade.warmth ?? 0) > 0.001 else { return }     // by day there is nothing to lift
+        let r = state?.room
+        if r.map({ abs($0.darkness - $0.target) < 0.001 }) ?? false || r == nil {
+            guard Date().timeIntervalSince(roomLastRead) >= 3 else { return }
+            roomLastRead = Date()
+            let lux = roomSensor.lux()
+            if let r = r {
+                switch lux {
+                case let l?: guard abs(log2(l + 1) - log2(max(0, r.lux) + 1)) > 0.25 else { return }   // within a fifth: the same room
+                case nil: guard r.darkness > 0 else { return }       // lid closed: ease any lift away
+                }
+            } else if lux == nil { return }
+        }
+        roomInFlight = true
+        liveQueue.async { [weak self] in
+            _ = runStatus(cliURL.path, ["room"])
+            DispatchQueue.main.async { guard let self = self else { return }; self.roomInFlight = false; self.refresh() }
+        }
     }
     func refresh() {
         if snapshotDemo { demoLook(); return }
@@ -1295,6 +1357,7 @@ final class Model: ObservableObject {
             }
         }
         if let v = l.keyboardBrightness { lastKeyboard = v } else { l.keyboardBrightness = lastKeyboard ?? live.keyboardBrightness }
+        plannedWarmth = line.split(separator: " ").first { $0.hasPrefix("planned=") }.flatMap { Double($0.dropFirst(8)) }
         live = l
         syncKeyboardHold()
         if ProcessInfo.processInfo.environment["MIDNIGHT_DEBUG"] != nil {
@@ -1763,7 +1826,7 @@ struct Panel: View {
         let kbOK = s.keyboardBrightness.map { abs(kbTicks($0) - kbTicks(m.live.keyboardBrightness)) < 1 } ?? true
         let shadeOK = (s.shadeEnabled ?? m.shade.enabled) == m.shade.enabled
             && (!m.shade.enabled || s.shadeLevel.map { abs($0 - m.shade.level) < 0.02 } ?? true)
-        let warmOK = abs((s.warmth ?? 0) - (m.live.warmth ?? 0)) < 0.03
+        let warmOK = abs((s.warmth ?? 0) - (m.plannedWarmth ?? m.live.warmth ?? 0)) < 0.03     // a dark room's lift isn't a change of preset
         return kbOK && shadeOK && warmOK
     }
     @State private var newName = ""
@@ -1849,6 +1912,11 @@ struct SettingsPage: View {
                 }.labelsHidden().controlSize(.small).frame(width: 96)
             }.frame(height: 32)
             TextRow(text: m.nightPresetName.map { "Sunset eases into “\($0)”" } ?? "Sunset eases into a custom mix", secondary: true)
+            ToggleRow(label: "Deepen in a Dark Room", isOn: Binding(get: { m.config.roomLight?.enabled ?? true }, set: {
+                var r = m.config.roomLight ?? RoomLight(); r.enabled = $0; m.config.roomLight = r
+                m.saveConfig(reapply: false); m.runCLI(["room"])           // queued behind the save: on eases in, off draws your level
+            }), drawn: m.snapshotMode)
+            TextRow(text: "The darker the room, the redder the screen", secondary: true)
             Line()
 
             Header(text: "Learning")
