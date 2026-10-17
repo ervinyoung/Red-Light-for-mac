@@ -80,15 +80,16 @@ struct Learning: Codable {
     }
 }
 struct Preset: Codable { var name: String; var icon: String; var settings: Settings }
-/// Deepen the red in a dark room. `strength` 1 takes a pitch-dark room to 100 %. Lenient, like `Learning`.
+/// Deepen the red in a dark room: a pitch-dark room takes Red Shift `strength` of the way to 100 % (1 was too red at
+/// night). Lenient, like `Learning`.
 struct RoomLight: Codable {
     var enabled = true
-    var strength = 1.0
+    var strength = 0.6
     init() {}
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? true
-        strength = max(0, min(1, (try? c.decode(Double.self, forKey: .strength)) ?? 1))
+        strength = max(0, min(1, (try? c.decode(Double.self, forKey: .strength)) ?? 0.6))
     }
 }
 struct Config: Codable {

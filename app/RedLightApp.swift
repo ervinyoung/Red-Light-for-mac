@@ -30,8 +30,8 @@ struct Shortcuts: Codable {
 struct Preset: Codable, Identifiable { var name: String; var icon: String; var settings: Settings; var id: String { name } }
 /// True colour for colour-critical apps: ask, or remember per app (bundle identifiers).
 struct TrueColor: Codable { var ask = true; var always: [String] = []; var never: [String] = [] }
-/// Deepen the red in a dark room (the engine's `lifted`). `strength` 1 takes a pitch-dark room to 100 %.
-struct RoomLight: Codable { var enabled = true; var strength = 1.0 }
+/// Deepen the red in a dark room (the engine's `lifted`): a pitch-dark room takes Red Shift `strength` of the way to 100 %.
+struct RoomLight: Codable { var enabled = true; var strength = 0.6 }
 struct Config: Codable {
     var latitude: Double; var longitude: Double; var locationSource: String?; var fadeMinutes: Double?
     var night: Settings; var dayDefaults: Settings

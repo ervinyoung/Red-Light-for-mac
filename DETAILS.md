@@ -112,14 +112,14 @@ tint; `shade.json` stores both.
 
 At night, Red Light reads your Mac's ambient light sensor and deepens Red Shift as your room gets darker. In a
 lit room (150 lux or more), you see the level you chose. As the light falls to about 2 lux, Red Shift rises
-toward 100%. A change takes about 45 seconds, so a hand passing over the sensor doesn't flicker the screen.
+60% of the way from your level to 100%: from 15% to 66%, for example. A change takes about 45 seconds, so a hand passing over the sensor doesn't flicker the screen.
 
 The deepening follows the sunset and sunrise fades, so it never jumps at a transition. It's off by day, while
 paused, with the lid closed, and when you turn Red Shift down to 0. The slider shows the level you see. Moving
 it sets the level for the current light, and Red Light learns from your chosen level, not the room's.
 
 To turn it off, in **Red Light Settings**, turn off **Deepen in a Dark Room**, or set `roomLight.enabled` to
-`false` in `config.json`. To deepen it less, set `roomLight.strength` to a value below 1.
+`false` in `config.json`. To change how much it deepens, set `roomLight.strength` from 0 to 1. The default is 0.6.
 
 ## Sunset and sunrise
 
