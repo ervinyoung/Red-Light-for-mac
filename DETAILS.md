@@ -80,7 +80,7 @@ The following table lists the commands:
 | `redlight learned`, `redlight forget` | Show or clear the defaults that Red Light adopted. |
 | `redlight hold Figma` | Show true color while a color-sensitive app is in front. |
 | `redlight release` | Restore the red after a hold. |
-| `redlight room` | Read the light sensor and ease Red Shift toward the room's level. The app runs this while the light changes. |
+| `redlight room` | Read the light sensor and set Red Shift for the room. The app runs `redlight room <lux>` with its filtered reading when the room's light settles at a new level. |
 | `redlight curve` | Print the Red Shift curve. |
 
 While the switch is off, the `pause`, `set`, `preset apply`, and `shade` commands return an error. Turn the
@@ -119,8 +119,17 @@ At night, Red Light reads your Mac's ambient light sensor and sets Red Shift fro
 | 2 lux | 45% |
 | Dark | 60% |
 
-A change eases in at about 1% a second, so a hand passing over the sensor doesn't flicker the screen. The
-level follows the sunset and sunrise fades, so it never jumps at a transition. By day, while paused, and with
+Red Light filters the sensor the way True Tone and auto-brightness do, so changes are hard to notice:
+
+- It reads the sensor twice a second and keeps a fast average (2 seconds) and a slow average (8 seconds).
+- It ignores any change within 30% of the current light level.
+- It waits until both averages agree, and the new level holds for 5 seconds (brighter) or 8 seconds (darker).
+  A passing shadow, a hand over the sensor, or a flash on screen never gets that far.
+- It draws the change continuously, starting and ending gently, over 10 to 40 seconds depending on its size.
+- While a change plays out, and for 5 seconds after, the screen's own changing light can't start another one.
+
+The level follows the sunset and sunrise fades, so it never jumps at a transition, and each minute's fade step is
+drawn across the minute, too. By day, while paused, and with
 the lid closed, Red Shift is your own level.
 
 The slider shows the level you see. Moving it shifts the room's curve for the rest of the night: above the

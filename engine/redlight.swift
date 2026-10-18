@@ -48,7 +48,10 @@ struct Settings: Codable {
 }
 /// Rendered by the menu bar app. `gammaBlue`/`gammaGreen` are channel multipliers derived from `warmth`.
 /// `warmth` is what is drawn; `base` what the schedule, a preset or the slider chose, before the room's lift (see `lifted`).
-struct Shade: Codable { var enabled: Bool = false; var level: Double = 0.3; var warmth: Double? = 0; var gammaBlue: Double? = 1; var gammaGreen: Double? = 1; var base: Double? }
+/// `ease`: draw this warmth over that many seconds from what is on screen (a room change, a fade step), starting at
+/// `easeAt` (seconds since 1970) — the app animates it, the tint leg too when `tintDeferred` (see `apply`).
+struct Shade: Codable { var enabled: Bool = false; var level: Double = 0.3; var warmth: Double? = 0; var gammaBlue: Double? = 1; var gammaGreen: Double? = 1; var base: Double?
+    var ease: Double?; var easeAt: Double?; var tintDeferred: Bool? }
 struct Commanded: Codable { var keyboardBrightness: Double? }
 /// macOS's lowest keyboard level is 0.001, which drives the backlight's PWM at 54 of 960 ticks; every value up to about
 /// 0.008 is that same level. The hardware goes down to 1 tick, and the menu bar app holds it there: a value between 0
@@ -239,17 +242,31 @@ func readCurrent() -> Settings {
     }
     // The chosen warmth, not the drawn one: the room's lift is never a change of yours, nor a fade's starting point.
     let sh = loadShade(); s.shadeEnabled = sh.enabled; s.shadeLevel = sh.level; s.warmth = sh.base ?? sh.warmth ?? 0
+    // While the app eases the tint leg, the filter is on its way to what the warmth calls for: not a change of yours.
+    if sh.tintDeferred == true { s.filterEnabled = tintTarget(sh) > 0.001 && !holdTint }
     return s
+}
+func tintTarget(_ sh: Shade) -> Double { warmthCurve(sh.warmth ?? 0).tint }
+/// After an eased change the app has drawn the tint leg; if it couldn't (it quit mid-way), put it where it belongs.
+func settleTint() {
+    var sh = loadShade()
+    guard sh.tintDeferred == true, Date().timeIntervalSince1970 > (sh.easeAt ?? 0) + (sh.ease ?? 0) + 3 else { return }
+    let t = tintTarget(sh); maSetInten(t); maSetEnabled(colorCategory, !holdTint && t > 0.001)
+    sh.tintDeferred = nil; saveShade(sh)
 }
 /// Set while a colour-critical app holds true colour: everything is applied as usual except the tint stays off.
 var holdTint = false
-func apply(_ s: Settings, label: String, quiet: Bool = false) {
+/// `ease` > 0 asks the app to draw the warmth change continuously over that many seconds, as True Tone does, instead of
+/// in one step; while it runs, the app also eases the tint leg, so the engine leaves the filter's intensity to it.
+func apply(_ s: Settings, label: String, quiet: Bool = false, ease: Double = 0) {
     if let w = s.warmth {
         // Warmth owns the color filter. The tint is one leg of the curve; the gamma legs go to the app.
         let shown = lifted(w), c = warmthCurve(shown)
+        let deferTint = ease > 0 && runningApp()
         maSetType(colorCategory, 16); maSetHue(1.0)
-        maSetInten(c.tint); maSetEnabled(colorCategory, !holdTint && c.tint > 0.001)
+        if !deferTint { maSetInten(c.tint); maSetEnabled(colorCategory, !holdTint && c.tint > 0.001) }
         var sh = loadShade(); sh.warmth = shown; sh.base = w; sh.gammaBlue = c.blue; sh.gammaGreen = c.green
+        sh.ease = ease > 0 ? ease : nil; sh.easeAt = ease > 0 ? Date().timeIntervalSince1970 : nil; sh.tintDeferred = deferTint ? true : nil
         if let e = s.shadeEnabled { sh.enabled = e }
         if let l = s.shadeLevel { sh.level = l }
         saveShade(sh)
@@ -640,8 +657,9 @@ func stepRamp(_ st: inout State, now: Date) {
     guard let r = st.ramp else { return }
     let t = now.timeIntervalSince(r.start) / r.seconds
     roomNightness = nightness(st, now: now)
-    if t >= 1 { apply(r.to, label: "\(r.label) 100%"); st.ramp = nil }
-    else { apply(blend(r.from, r.to, t), label: "\(r.label) \(Int(t * 100))%", quiet: true) }
+    // Each minute's step is drawn across the minute, so the fade is continuous rather than a step a minute.
+    if t >= 1 { apply(r.to, label: "\(r.label) 100%", ease: 60); st.ramp = nil }
+    else { apply(blend(r.from, r.to, t), label: "\(r.label) \(Int(t * 100))%", quiet: true, ease: 60) }
     st.lastSeen = readCurrent()
 }
 func runningApp() -> Bool {
@@ -759,15 +777,17 @@ func unlifted(_ x: Double) -> Double {
     let R = roomLevel * roomStrength * roomNightness, B = roomNightWarmth * roomNightness
     return x >= R ? min(1, B + (x - R)) : B * x / R
 }
-/// Eases the room's level toward what the sensor reads, by at most 1 % a second: lights going out bring the red in over
-/// half a minute, and a hand over the sensor is a flicker of a percent. True if the drawn warmth is now out of date.
-func senseRoom(_ st: inout State, now: Date) -> Bool {
-    let lux = roomStrength > 0 ? roomLux() : nil
+/// Sets the room from a reading: `given` is the app's, already filtered the way True Tone and auto-brightness filter
+/// theirs (averaged, past a dead band, held for seconds); otherwise the sensor is read here. Without the app (`glide`)
+/// a reading moves the level by at most 1 % a second, since nothing else smooths it. True if the drawn warmth is out
+/// of date.
+func senseRoom(_ st: inout State, now: Date, lux given: Double? = nil, glide: Bool = false) -> Bool {
+    let lux = roomStrength > 0 ? (given ?? roomLux()) : nil
     if let lux = lux {
         let target = roomCurve(lux: lux)
         let was = st.room.flatMap { $0.lux >= 0 ? $0.darkness : nil } ?? target      // a first reading starts there
-        let step = st.room.map { max(0, now.timeIntervalSince($0.at)) * 0.01 } ?? 0
-        let d = target > was ? min(target, was + step) : max(target, was - step)
+        var d = target
+        if glide { let step = st.room.map { max(0, now.timeIntervalSince($0.at)) * 0.01 } ?? 0; d = target > was ? min(target, was + step) : max(target, was - step) }
         st.room = Room(lux: lux, target: target, darkness: d, at: now)
         roomLevel = d; roomActive = true
         if d == target && abs(was - target) > 0.001 {
@@ -778,11 +798,14 @@ func senseRoom(_ st: inout State, now: Date) -> Bool {
     let sh = loadShade()
     return abs(lifted(sh.base ?? sh.warmth ?? 0) - (sh.warmth ?? 0)) > 0.003
 }
-/// Redraws the chosen warmth for the room. The tint leg can switch across 60 %, which is not a change of yours.
-func reliftWarmth(_ st: inout State) {
-    let sh = loadShade(); var s = Settings(); s.warmth = sh.base ?? sh.warmth ?? 0
-    apply(s, label: "ROOM", quiet: true)
-    st.lastSeen?.filterEnabled = maGetEnabled(colorCategory)
+/// Redraws the chosen warmth for the room, eased: 10 s for the smallest change, a further 6 s for every 10 % of Red
+/// Shift, 40 s at most. The tint leg can switch across 60 %, which is not a change of yours.
+func reliftWarmth(_ st: inout State, eased: Bool = true) {
+    let sh = loadShade(), base = sh.base ?? sh.warmth ?? 0
+    let delta = abs(lifted(base) - (sh.warmth ?? 0))
+    var s = Settings(); s.warmth = base
+    apply(s, label: "ROOM", quiet: true, ease: eased ? min(40, 10 + 60 * delta) : 0)
+    st.lastSeen?.filterEnabled = readCurrent().filterEnabled
 }
 
 // MARK: - Main
@@ -830,7 +853,10 @@ case "check":
     pruneEvents(olderThan: now.addingTimeInterval(-Double((cfg.learning ?? Learning()).lookbackDays + 7) * 86400))
     let newLearned = learn(cfg: cfg, learned: learned, state: &st, now: now)
     if (try? enc.encode(newLearned)) != (try? enc.encode(learned)) { saveLearned(newLearned); learned = newLearned; roomNightWarmth = max(0.05, nightPreset(cfg: cfg, learned: learned).warmth ?? 0.8) }
-    let roomMoved = senseRoom(&st, now: now)      // before any fade step, which then draws for the room as it is
+    // Before any fade step, which then draws for the room as it is. The app senses the room while it runs (`room
+    // <lux>`); this only does it without the app.
+    let roomMoved = runningApp() ? false : senseRoom(&st, now: now, glide: true)
+    settleTint()
     var redrawn = false
     var want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
     if let f = st.forcedAt {
@@ -854,14 +880,18 @@ case "check":
             stepRamp(&st, now: now); redrawn = true
         }
     }
-    if roomMoved && !redrawn { reliftWarmth(&st) }
+    if roomMoved && !redrawn { reliftWarmth(&st, eased: false) }
     saveState(st)
 case "room":
-    // The app's call while the room's light is changing; the minute check does the same.
+    // `room <lux>`: the app's filtered reading, after the room's light has settled at a new level. `room none`: no
+    // reading (the lid closed). `room`: read the sensor now.
     var st = loadState() ?? blank()
     if st.disabled == true || (st.pausedUntil.map { now < $0 } ?? false) { exit(0) }
     holdTint = st.heldFor != nil
-    if senseRoom(&st, now: now) { reliftWarmth(&st) }
+    let arg = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : nil
+    let moved = arg == "none" ? { st.room = nil; roomActive = false; let sh = loadShade(); return abs(lifted(sh.base ?? sh.warmth ?? 0) - (sh.warmth ?? 0)) > 0.003 }()
+                              : senseRoom(&st, now: now, lux: arg.flatMap(Double.init))
+    if moved { reliftWarmth(&st) }
     saveState(st)
 case "night", "day":
     var st = loadState()

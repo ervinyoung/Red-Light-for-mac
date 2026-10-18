@@ -83,8 +83,18 @@ struct Learned: Codable {
     var nightKeyboardBrightness: Double?; var nightIdleDimSeconds: Double?; var nightShadeLevel: Double?; var nightWarmth: Double?
     var history: [String] = []
 }
-/// `warmth` is what is drawn; `base` the chosen warmth beneath a dark room's lift. Kept through every round trip here.
-struct Shade: Codable { var enabled = false; var level = 0.3; var warmth: Double? = 0; var gammaBlue: Double? = 1; var gammaGreen: Double? = 1; var base: Double? }
+/// `warmth` is what is drawn; `base` the chosen warmth beneath a dark room's lift. `ease`/`easeAt`: draw this warmth
+/// gradually (see Model.drawLook); `tintDeferred`: the tint leg too. Kept through every round trip here.
+struct Shade: Codable { var enabled = false; var level = 0.3; var warmth: Double? = 0; var gammaBlue: Double? = 1; var gammaGreen: Double? = 1; var base: Double?
+    var ease: Double?; var easeAt: Double?; var tintDeferred: Bool? }
+/// The Color Tint leg of Red Shift, which the app draws while it eases a change (the engine sets it otherwise).
+enum Tint {
+    private static let ma = dlopen("/System/Library/Frameworks/MediaAccessibility.framework/MediaAccessibility", RTLD_NOW)
+    private static func sym<T>(_ n: String, _ t: T.Type) -> T? { ma.flatMap { dlsym($0, n) }.map { unsafeBitCast($0, to: t) } }
+    private static let setEnabled = sym("MADisplayFilterPrefSetCategoryEnabled", (@convention(c) (Int, Bool) -> Void).self)
+    private static let setIntensity = sym("MADisplayFilterPrefSetSingleColorIntensity", (@convention(c) (Double) -> Void).self)
+    static func set(_ t: Double) { setIntensity?(t); setEnabled?(1, t > 0.001) }
+}
 
 /// Same curve as the engine, kept here only so a slider drag can paint the gamma legs without waiting on a process.
 func warmthCurve(_ w: Double) -> (blue: Double, green: Double, tint: Double) {
@@ -1039,7 +1049,7 @@ final class Model: ObservableObject {
             self.updater.tick(screenIsPlain: self.isOff || !self.isTinting)
         }
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.gamma.verify() }
-        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.watchRoom() }
+        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.watchRoom() }
         registerHotkeys()
         // Waking up: run a check right away so the lid opening at 11 PM never shows 60 s of daylight look.
         let nc = NSWorkspace.shared.notificationCenter
@@ -1113,29 +1123,46 @@ final class Model: ObservableObject {
         refreshWork = w
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: w)
     }
-    /// The room's light. The engine reads the sensor and eases the red (`redlight room`); this only notices when there
-    /// is something to ease: a sensor read every 3 s in-process, and while the engine is still easing, a `room` a second.
+    /// The room's light, filtered the way True Tone and auto-brightness filter theirs, so the red never chases the
+    /// sensor: a reading every half second, kept as two averages of its logarithm — a quick one (2 s) and a slow one
+    /// (8 s). Nothing moves until both agree the room is more than 30 % brighter or darker than the level in use, and
+    /// have kept agreeing for 5 s (brighter) or 8 s (darker): a passing shadow, a hand over the sensor or a flash on
+    /// screen never gets that far. Then `room <lux>` sets the new level and the change is drawn over 10–40 s (see
+    /// drawLook); while it plays out, and for 5 s after, the screen's own changing light can't start another.
     private let roomSensor = RoomSensor()
-    private var roomInFlight = false, roomLastRead = Date.distantPast
+    private var roomInFlight = false
+    private var luxFast: Double?, luxSlow: Double?
+    private var roomPending = 0, roomPendingSince = Date.distantPast, roomQuietUntil = Date.distantPast
     func watchRoom() {
-        guard !roomInFlight, !isOff, !isPaused, config.roomLight?.enabled ?? true else { return }
-        guard isNight || isFading || (shade.warmth ?? 0) > 0.001 else { return }     // by day there is nothing to lift
-        let r = state?.room
-        if r.map({ abs($0.darkness - $0.target) < 0.001 }) ?? false || r == nil {
-            guard Date().timeIntervalSince(roomLastRead) >= 3 else { return }
-            roomLastRead = Date()
-            let lux = roomSensor.lux()
-            if let r = r {
-                switch lux {
-                case let l?: guard abs(log2(l + 1) - log2(max(0, r.lux) + 1)) > 0.25 else { return }   // within a fifth: the same room
-                case nil: guard r.lux >= 0 else { return }           // lid closed: back to the schedule's own level
-                }
-            } else if lux == nil { return }
+        guard !roomInFlight, !isOff, !isPaused, config.roomLight?.enabled ?? true,
+              isNight || isFading || (shade.warmth ?? 0) > 0.001 else { luxFast = nil; luxSlow = nil; roomPending = 0; return }   // by day: nothing to set
+        let committed = state?.room.flatMap { $0.lux >= 0 ? $0.lux : nil }
+        guard let lux = roomSensor.lux() else {
+            luxFast = nil; luxSlow = nil; roomPending = 0
+            if committed != nil { sendRoom("none") }                 // lid closed: back to the schedule's own level
+            return
         }
+        // log(lux + 3): equal steps for equal ratios, with the dark end's sensor noise (2 lux against 3) damped
+        let x = log10(lux + 3)
+        luxFast = luxFast.map { $0 + (x - $0) * (1 - exp(-0.5 / 2)) } ?? x
+        luxSlow = luxSlow.map { $0 + (x - $0) * (1 - exp(-0.5 / 8)) } ?? x
+        guard let c = committed else { sendRoom(String(format: "%.1f", lux)); return }   // the first reading sets the room
+        guard Date() >= roomQuietUntil, let f = luxFast, let sl = luxSlow else { roomPending = 0; return }
+        let cx = log10(c + 3), band = 0.115                          // ±30 %
+        let dir = (f - cx > band && sl - cx > band) ? 1 : (cx - f > band && cx - sl > band) ? -1 : 0
+        if dir == 0 { roomPending = 0; return }
+        if dir != roomPending { roomPending = dir; roomPendingSince = Date(); return }
+        guard Date().timeIntervalSince(roomPendingSince) >= (dir > 0 ? 5 : 8) else { return }
+        roomPending = 0
+        sendRoom(String(format: "%.1f", max(0, pow(10, sl) - 3)))
+    }
+    private func sendRoom(_ arg: String) {
         roomInFlight = true
         liveQueue.async { [weak self] in
-            _ = runStatus(cliURL.path, ["room"])
-            DispatchQueue.main.async { guard let self = self else { return }; self.roomInFlight = false; self.refresh() }
+            _ = runStatus(cliURL.path, ["room", arg])
+            DispatchQueue.main.async { guard let self = self else { return }
+                self.roomInFlight = false; self.refresh()
+                self.roomQuietUntil = Date().addingTimeInterval((self.shade.ease ?? 0) + 5) }
         }
     }
     func refresh() {
@@ -1149,7 +1176,7 @@ final class Model: ObservableObject {
         state = (try? Data(contentsOf: stateURL)).flatMap { try? dec.decode(ModeState.self, from: $0) }
         learned = (try? Data(contentsOf: learnedURL)).flatMap { try? dec.decode(Learned.self, from: $0) } ?? Learned()
         var sh = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? Shade()
-        if setsInFlight > 0 { sh.warmth = shade.warmth; sh.gammaBlue = shade.gammaBlue; sh.gammaGreen = shade.gammaGreen }
+        if setsInFlight > 0 { sh.warmth = shade.warmth; sh.gammaBlue = shade.gammaBlue; sh.gammaGreen = shade.gammaGreen; sh.ease = nil; sh.easeAt = nil }
         if shadesInFlight > 0 { sh.enabled = shade.enabled; sh.level = shade.level }     // likewise for setShade()
         shade = sh
         if switchesInFlight == 0 { enabled = !(state?.disabled ?? false) }
@@ -1175,9 +1202,47 @@ final class Model: ObservableObject {
     private var holdsInFlight = 0
     var isTinting: Bool { !isOff && ((shade.warmth ?? 0) > 0.001 || shade.enabled) }
     func drawLook() {
-        if isOff || heldFor != nil { overlay.apply(Shade()); gamma.apply(blue: 1, green: 1); return }
+        if isOff || heldFor != nil { stopEase(finish: false); drawnWarmth = nil; overlay.apply(Shade()); gamma.apply(blue: 1, green: 1); return }
         overlay.apply(shade)
+        let target = shade.warmth ?? 0
+        // A change the engine marked as gradual (the room, a fade step) is drawn from what is on screen now, continuously,
+        // over the time it gave. Anything else — a slider, a preset, the switch — is drawn at once.
+        if let len = shade.ease, len > 0, let key = shade.easeAt {
+            if key == easeKey && easeTimer != nil { return }          // already on its way there
+            if key != easeKey {
+                easeKey = key
+                let elapsed = Date().timeIntervalSince1970 - key
+                if let from = drawnWarmth, abs(from - target) > 0.002, elapsed < len {
+                    easeFrom = from; easeTo = target; easeStart = Date(); easeLen = max(2, len - max(0, elapsed))
+                    easeTint = shade.tintDeferred == true
+                    easeTimer?.invalidate()
+                    easeTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.easeStep() }
+                    return
+                }
+            }
+        }
+        stopEase()
+        drawnWarmth = target
         gamma.apply(blue: shade.gammaBlue ?? 1, green: shade.gammaGreen ?? 1)
+    }
+    private var drawnWarmth: Double?                   // the warmth on screen now
+    private var easeTimer: Timer?, easeKey: Double?, easeTint = false, tintDrawn: Double?
+    private var easeFrom = 0.0, easeTo = 0.0, easeStart = Date(), easeLen = 1.0
+    /// One frame: ease-in, ease-out (a sine), so a change starts and ends too gently to see. The tint leg is written only
+    /// when it has moved a visible amount, about every few frames at most.
+    private func easeStep() {
+        let t = min(1, Date().timeIntervalSince(easeStart) / easeLen), e = 0.5 - 0.5 * cos(.pi * t)
+        let w = easeFrom + (easeTo - easeFrom) * e, c = warmthCurve(w)
+        drawnWarmth = w
+        gamma.apply(blue: c.blue, green: c.green)
+        if easeTint && (tintDrawn.map { abs($0 - c.tint) >= 0.004 } ?? true || t >= 1) { Tint.set(c.tint); tintDrawn = c.tint }
+        if t >= 1 { stopEase() }
+    }
+    private func stopEase(finish: Bool = true) {
+        // An ease cut short leaves the tint leg where the engine meant it to end, not part-way — unless it was cut short
+        // by off or true colour, whose tint is the engine's (none).
+        if finish && easeTimer != nil && easeTint && shade.tintDeferred == true { Tint.set(warmthCurve(easeTo).tint) }
+        easeTimer?.invalidate(); easeTimer = nil; tintDrawn = nil
     }
     var isNight: Bool { state?.mode == "night" }
     var isPaused: Bool { if let u = state?.pausedUntil { return u > Date() }; return false }
@@ -1258,7 +1323,7 @@ final class Model: ObservableObject {
         guard !isOff else { return }
         bringBackIfHeld()
         let c = warmthCurve(w)
-        shade.warmth = w; shade.gammaBlue = c.blue; shade.gammaGreen = c.green
+        shade.warmth = w; shade.gammaBlue = c.blue; shade.gammaGreen = c.green; shade.ease = nil; shade.easeAt = nil
         drawLook()
         set("warmth", w <= 0 ? "off" : String(format: "%.1f", w * 100), final: final)
     }
