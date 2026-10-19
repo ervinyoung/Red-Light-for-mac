@@ -83,15 +83,29 @@ struct Learning: Codable {
     }
 }
 struct Preset: Codable { var name: String; var icon: String; var settings: Settings }
-/// Let the room's light set Red Shift at night (see `roomCurve`); `strength` scales the room's level. Lenient, like `Learning`.
+/// Let the room's light set Red Shift at night: a level for each kind of room (see `roomKind`). Lenient, like `Learning`.
 struct RoomLight: Codable {
     var enabled = true
-    var strength = 1.0
+    /// The Red Shift for each kind of room at night, as you last chose it there (see `roomKind`).
+    var levels = RoomLevels()
     init() {}
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? true
-        strength = max(0, min(1, (try? c.decode(Double.self, forKey: .strength)) ?? 1))
+        levels = (try? c.decode(RoomLevels.self, forKey: .levels)) ?? RoomLevels()
+    }
+}
+struct RoomLevels: Codable {
+    var dark = 0.65, dim = 0.25, lit = 0.0
+    init() {}
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self), z = RoomLevels.init()
+        func v(_ k: CodingKeys, _ dflt: Double) -> Double { max(0, min(1, (try? c.decode(Double.self, forKey: k)) ?? dflt)) }
+        dark = v(.dark, z.dark); dim = v(.dim, z.dim); lit = v(.lit, z.lit)
+    }
+    subscript(kind kind: String) -> Double {
+        get { kind == "dark" ? dark : kind == "dim" ? dim : lit }
+        set { switch kind { case "dark": dark = newValue; case "dim": dim = newValue; default: lit = newValue } }
     }
 }
 struct Config: Codable {
@@ -152,10 +166,10 @@ struct State: Codable {
     var customTintHeld: Bool?
     /// When `night`/`day` ("Turn On Now") overrode the schedule. The override stands until the schedule next turns.
     var forcedAt: Date?
-    /// The room as last sensed: `darkness` eases toward `target` (see `senseRoom`). `lux` is -1 with no reading.
+    /// The room as last sensed: its `kind` (dark, dim or lit) and the level that kind has (`target`, `darkness`).
     var room: Room?
 }
-struct Room: Codable { var lux: Double; var target: Double; var darkness: Double; var at: Date }
+struct Room: Codable { var lux: Double; var target: Double; var darkness: Double; var at: Date; var kind: String? }
 struct Learned: Codable {
     var sunsetOffsetMinutes: Double = 0
     var sunriseOffsetMinutes: Double = 0
@@ -731,28 +745,30 @@ func roomLux() -> Double? {
           let e = hidCopyEvent(s, 12, 0, 0)?.takeRetainedValue() else { return nil }
     return hidFloat(e, 12 << 16)
 }
-/// The Red Shift a room calls for at night, on a log scale through (lux, warmth): bright as 20 lux or more, off; 10 lux
-/// (a dim lamp across the room), 22 %; 2 lux, 45 %; pitch dark, 60 %. Tuned by hand: 81 % at 9 lux was too red.
-func roomCurve(lux: Double) -> Double {
-    let pts: [(Double, Double)] = [(20, 0), (10, 0.22), (2, 0.45), (0, 0.6)]
-    let x = log10(max(0, lux) + 1)
-    if x >= log10(pts[0].0 + 1) { return 0 }
-    for i in 1..<pts.count {
-        let (l0, w0) = pts[i - 1], (l1, w1) = pts[i], x0 = log10(l0 + 1), x1 = log10(l1 + 1)
-        if x >= x1 { return w0 + (w1 - w0) * (x0 - x) / (x0 - x1) }
+/// At night a room is dark, dim or lit, never a precise number of lux: in a dark room the sensor mostly sees the
+/// screen's own light coming back off you and the walls, so it swings between 0 and 5 lux as the page changes, and a
+/// level that tracked it swung with it. The margins between the kinds are wide, so nothing short of a lamp going on or
+/// off moves a room from one to the next. (The app classifies the same way, with averaging and a wait, and sends the
+/// kind; this is for `room <lux>` and the minute check when the app isn't running.)
+func roomKind(lux: Double, was: String?) -> String {
+    switch was {
+    case "dark": return lux > 30 ? "lit" : lux > 8 ? "dim" : "dark"
+    case "dim":  return lux > 22 ? "lit" : lux < 4 ? "dark" : "dim"
+    case "lit":  return lux < 4 ? "dark" : lux < 15 ? "dim" : "lit"
+    default:     return lux < 5 ? "dark" : lux < 20 ? "dim" : "lit"
     }
-    return pts.last!.1
 }
-/// The room's level (eased, see `senseRoom`), and whether there is a room to go by: no sensor reading means the
-/// schedule's own level, as without this feature — never off because the lid is closed.
-var roomLevel = 0.0, roomActive = false, roomStrength = 0.0, roomNightness = 0.0, roomNightWarmth = 0.8
+/// The room's level, and whether there is a room to go by: no sensor reading means the schedule's own level, as
+/// without this feature — never off because the lid is closed.
+var roomLevel = 0.0, roomActive = false, roomNightness = 0.0, roomKindNow: String? = nil
+var roomLevels = RoomLevels(), roomEnabled = true
 func setRoomContext(cfg: Config, learned: Learned, state: State?, now: Date) {
     let r = cfg.roomLight ?? RoomLight()
-    roomStrength = r.enabled ? r.strength : 0
-    roomActive = roomStrength > 0 && (state?.room.map { $0.lux >= 0 } ?? false)
-    roomLevel = state?.room?.darkness ?? 0
+    roomLevels = r.levels; roomEnabled = r.enabled
+    roomKindNow = r.enabled ? state?.room?.kind : nil
+    roomActive = roomKindNow != nil
+    roomLevel = roomKindNow.map { roomLevels[kind: $0] } ?? 0
     roomNightness = nightness(state, now: now)
-    roomNightWarmth = max(0.05, nightPreset(cfg: cfg, learned: learned).warmth ?? 0.8)
 }
 /// How far into night the schedule is: 0 by day, 1 at night, and the fade's progress in between, so the room's level
 /// rides the sunset fade in and the sunrise fade out rather than jumping at either.
@@ -761,40 +777,34 @@ func nightness(_ st: State?, now: Date) -> Double {
     let t = st.ramp.map { max(0, min(1, now.timeIntervalSince($0.start) / $0.seconds)) }
     switch st.mode { case "night": return t ?? 1; case "day": return t.map { 1 - $0 } ?? 0; default: return 0 }
 }
-/// The warmth drawn for a chosen one. At night the room sets the level: the night level draws as the room's, and a
-/// chosen warmth above or below it moves the room's up (by the difference) or down (in proportion, so 0 is off in any
-/// room). The fades scale both, and by day the chosen warmth is drawn as it is.
+/// The warmth drawn for a scheduled one. At night, with a room to go by, it is the level remembered for that kind of
+/// room, faded in and out with the sunset and sunrise fades. Off (0: switched off, paused) stays off in any room.
 func lifted(_ w: Double) -> Double {
     let w = max(0, min(1, w))
-    guard roomActive, roomNightness > 0 else { return w }
-    let R = roomLevel * roomStrength * roomNightness, B = roomNightWarmth * roomNightness
-    return w >= B ? min(1, R + (w - B)) : R * w / B
+    guard roomActive, roomNightness > 0, w > 0.001 else { return w }
+    return roomLevel * roomNightness
 }
-/// The chosen warmth that is drawn as `x` in this room: what the slider sets, so it moves the curve, not the room.
-func unlifted(_ x: Double) -> Double {
-    let x = max(0, min(1, x))
-    guard roomActive, roomNightness > 0, x > 0 else { return x }
-    let R = roomLevel * roomStrength * roomNightness, B = roomNightWarmth * roomNightness
-    return x >= R ? min(1, B + (x - R)) : B * x / R
+/// What you set at night in a kind of room is that room's level from then on.
+func rememberRoomLevel(_ x: Double) {
+    guard let kind = roomKindNow, roomNightness > 0 else { return }
+    guard var c = loadConfig() else { return }; var r = c.roomLight ?? RoomLight()
+    r.levels[kind: kind] = max(0, min(1, x / roomNightness))
+    c.roomLight = r; saveConfig(c)
+    roomLevels = r.levels; roomLevel = r.levels[kind: kind]
+    log(String(format: "%@ room: red shift %.0f%% from now on", kind, roomLevel * 100))
 }
-/// Sets the room from a reading: `given` is the app's, already filtered the way True Tone and auto-brightness filter
-/// theirs (averaged, past a dead band, held for seconds); otherwise the sensor is read here. Without the app (`glide`)
-/// a reading moves the level by at most 1 % a second, since nothing else smooths it. True if the drawn warmth is out
-/// of date.
-func senseRoom(_ st: inout State, now: Date, lux given: Double? = nil, glide: Bool = false) -> Bool {
-    let lux = roomStrength > 0 ? (given ?? roomLux()) : nil
-    if let lux = lux {
-        let target = roomCurve(lux: lux)
-        let was = st.room.flatMap { $0.lux >= 0 ? $0.darkness : nil } ?? target      // a first reading starts there
-        var d = target
-        if glide { let step = st.room.map { max(0, now.timeIntervalSince($0.at)) * 0.01 } ?? 0; d = target > was ? min(target, was + step) : max(target, was - step) }
-        st.room = Room(lux: lux, target: target, darkness: d, at: now)
-        roomLevel = d; roomActive = true
-        if d == target && abs(was - target) > 0.001 {
-            let sh = loadShade()
-            log(String(format: "room at %.0f lux: red shift shown at %.0f%%", lux, lifted(sh.base ?? sh.warmth ?? 0) * 100))
-        }
-    } else { st.room = nil; roomActive = false }
+/// Sets the room: `kind` from the app (its reading averaged, past the margins, held for seconds), or classified here
+/// from `lux` or the sensor. True if the drawn warmth is out of date.
+func senseRoom(_ st: inout State, now: Date, kind given: String? = nil, lux luxGiven: Double? = nil) -> Bool {
+    let enabled = roomEnabled
+    let lux = enabled ? (luxGiven ?? (given == nil ? roomLux() : nil)) : nil
+    let kind = enabled ? (given ?? lux.map { roomKind(lux: $0, was: st.room?.kind) }) : nil
+    if let kind = kind {
+        let level = roomLevels[kind: kind]
+        if st.room?.kind != kind { log(String(format: "%@ room%@: red shift %.0f%%", kind, lux.map { String(format: " (%.0f lux)", $0) } ?? "", level * 100)) }
+        st.room = Room(lux: lux ?? st.room?.lux ?? -1, target: level, darkness: level, at: now, kind: kind)
+        roomKindNow = kind; roomLevel = level; roomActive = true
+    } else { st.room = nil; roomKindNow = nil; roomActive = false }
     let sh = loadShade()
     return abs(lifted(sh.base ?? sh.warmth ?? 0) - (sh.warmth ?? 0)) > 0.003
 }
@@ -852,10 +862,10 @@ case "check":
     st = observed
     pruneEvents(olderThan: now.addingTimeInterval(-Double((cfg.learning ?? Learning()).lookbackDays + 7) * 86400))
     let newLearned = learn(cfg: cfg, learned: learned, state: &st, now: now)
-    if (try? enc.encode(newLearned)) != (try? enc.encode(learned)) { saveLearned(newLearned); learned = newLearned; roomNightWarmth = max(0.05, nightPreset(cfg: cfg, learned: learned).warmth ?? 0.8) }
+    if (try? enc.encode(newLearned)) != (try? enc.encode(learned)) { saveLearned(newLearned); learned = newLearned }
     // Before any fade step, which then draws for the room as it is. The app senses the room while it runs (`room
     // <lux>`); this only does it without the app.
-    let roomMoved = runningApp() ? false : senseRoom(&st, now: now, glide: true)
+    let roomMoved = runningApp() ? false : senseRoom(&st, now: now)
     settleTint()
     var redrawn = false
     var want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
@@ -888,9 +898,12 @@ case "room":
     var st = loadState() ?? blank()
     if st.disabled == true || (st.pausedUntil.map { now < $0 } ?? false) { exit(0) }
     holdTint = st.heldFor != nil
+    // `room dark|dim|lit [lux]`: the app's settled reading. `room none`: no reading. `room <lux>` or `room`: classify here.
     let arg = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : nil
-    let moved = arg == "none" ? { st.room = nil; roomActive = false; let sh = loadShade(); return abs(lifted(sh.base ?? sh.warmth ?? 0) - (sh.warmth ?? 0)) > 0.003 }()
-                              : senseRoom(&st, now: now, lux: arg.flatMap(Double.init))
+    let luxArg = CommandLine.arguments.count > 3 ? Double(CommandLine.arguments[3]) : arg.flatMap(Double.init)
+    let kindArg = ["dark", "dim", "lit"].contains(arg ?? "") ? arg : nil
+    let moved = arg == "none" ? { st.room = nil; roomKindNow = nil; roomActive = false; let sh = loadShade(); return abs(lifted(sh.base ?? sh.warmth ?? 0) - (sh.warmth ?? 0)) > 0.003 }()
+                              : senseRoom(&st, now: now, kind: kindArg, lux: luxArg)
     if moved { reliftWarmth(&st) }
     saveState(st)
 case "night", "day":
@@ -986,7 +999,12 @@ case "set":
     refuseIfOff(); honourHold()
     var s = Settings()
     switch field {
-    case "warmth": s.warmth = off ? 0 : unlifted(max(0, min(1, num / 100)))     // what you see is what you set
+    case "warmth":
+        let x = off ? 0 : max(0, min(1, num / 100))
+        if roomActive && roomNightness > 0 {
+            // At night in a known kind of room the slider sets that room's level; the schedule's own warmth stays.
+            rememberRoomLevel(x); let sh = loadShade(); s.warmth = max(0.01, sh.base ?? sh.warmth ?? 0.01)
+        } else { s.warmth = x }
     case "keyboard": s.keyboardAutoBrightness = false; s.keyboardBrightness = off ? 0 : max(0, min(1, num / 100))
     case "idle":
         guard !off, num >= 1 else { print("idle needs a number of seconds (1 or more)"); exit(2) }
@@ -1016,6 +1034,8 @@ case "preset":
         var s = p.settings
         if s.warmth == nil { s.warmth = 0 }
         if s.keyboardBrightness != nil { s.keyboardAutoBrightness = false }
+        // At night in a known kind of room, the preset's Red Shift becomes that room's level, like the slider.
+        if roomActive && roomNightness > 0, let w = s.warmth { rememberRoomLevel(w); if w > 0.001 { s.warmth = max(w, 0.01) } }
         apply(s, label: "PRESET \(p.name)")
     case "save":
         guard !name.isEmpty else { print("usage: redlight preset save <name> [sf-symbol]"); exit(2) }
@@ -1088,7 +1108,7 @@ case "status":
     var cur = readCurrent(); let base = cur.warmth; let sh = loadShade(); cur.warmth = sh.warmth ?? base
     // `warmth` as drawn (the slider shows it); `planned` the chosen warmth beneath a dark room's lift.
     let roomNote = (base.map { abs((sh.warmth ?? $0) - $0) > 0.005 ? String(format: " planned=%.2f", $0) : "" } ?? "")
-        + (st?.room.map { $0.lux >= 0 ? String(format: " room=%.0flux", $0.lux) : "" } ?? "")
+        + (st?.room.map { ($0.kind.map { " room=\($0)" } ?? "") + ($0.lux >= 0 ? String(format: " lux=%.0f", $0.lux) : "") } ?? "")
     print("current: \(describe(cur))\(roomNote)\(runningApp() ? "" : "   [menu bar app not running: shade and warmth are not applied]")")
     print("night preset: \(describe(nightPreset(cfg: cfg, learned: learned)))")
     if let snap = st?.daySnapshot { print("saved day settings: \(describe(snap))") }

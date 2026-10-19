@@ -30,8 +30,9 @@ struct Shortcuts: Codable {
 struct Preset: Codable, Identifiable { var name: String; var icon: String; var settings: Settings; var id: String { name } }
 /// True colour for colour-critical apps: ask, or remember per app (bundle identifiers).
 struct TrueColor: Codable { var ask = true; var always: [String] = []; var never: [String] = [] }
-/// Let the room's light set Red Shift at night (the engine's `roomCurve` and `lifted`); `strength` scales the room's level.
-struct RoomLight: Codable { var enabled = true; var strength = 1.0 }
+/// Let the room's light set Red Shift at night: the level you last chose in each kind of room (the engine's `roomKind`).
+struct RoomLight: Codable { var enabled = true; var levels = RoomLevels() }
+struct RoomLevels: Codable { var dark = 0.65; var dim = 0.25; var lit = 0.0 }
 struct Config: Codable {
     var latitude: Double; var longitude: Double; var locationSource: String?; var fadeMinutes: Double?
     var night: Settings; var dayDefaults: Settings
@@ -61,7 +62,15 @@ extension RoomLight {
     init(from d: Decoder) throws {
         self.init(); guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }
         enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? enabled
-        strength = (try? c.decodeIfPresent(Double.self, forKey: .strength)) ?? strength
+        levels = (try? c.decodeIfPresent(RoomLevels.self, forKey: .levels)) ?? levels
+    }
+}
+extension RoomLevels {
+    init(from d: Decoder) throws {
+        self.init(); guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }
+        dark = (try? c.decodeIfPresent(Double.self, forKey: .dark)) ?? dark
+        dim = (try? c.decodeIfPresent(Double.self, forKey: .dim)) ?? dim
+        lit = (try? c.decodeIfPresent(Double.self, forKey: .lit)) ?? lit
     }
 }
 extension TrueColor {
@@ -76,8 +85,8 @@ struct Ramp: Codable { var start: Date; var seconds: Double; var from: Settings;
 /// Written only by the engine. `disabled` is the master switch; `heldFor` names the app holding true colour.
 struct ModeState: Codable { var mode: String; var daySnapshot: Settings?; var lastSeen: Settings?; var lastNotified: Date?; var ramp: Ramp?; var pausedUntil: Date?
     var disabled: Bool?; var heldFor: String?; var room: Room? }
-/// The room as the engine last sensed it: `darkness` eases toward `target`; `lux` is -1 with no reading.
-struct Room: Codable { var lux: Double; var target: Double; var darkness: Double; var at: Date }
+/// The room as the engine last set it: its `kind` (dark, dim or lit) and that kind's level; `lux` is -1 with no reading.
+struct Room: Codable { var lux: Double; var target: Double; var darkness: Double; var at: Date; var kind: String? }
 struct Learned: Codable {
     var sunsetOffsetMinutes = 0.0; var sunriseOffsetMinutes = 0.0
     var nightKeyboardBrightness: Double?; var nightIdleDimSeconds: Double?; var nightShadeLevel: Double?; var nightWarmth: Double?
@@ -1009,7 +1018,6 @@ final class Model: ObservableObject {
     @Published var launchAtLogin = false
     @Published var recording: String? = nil
     @Published var live = Settings()
-    var plannedWarmth: Double?              // the chosen warmth when a dark room lifts what `live.warmth` shows
     @Published var locationDenied = false
     var snapshotMode = isSnapshotRun
     var snapshotDaylight = false      // --snapshot … daylight, to capture the daytime state
@@ -1123,43 +1131,52 @@ final class Model: ObservableObject {
         refreshWork = w
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: w)
     }
-    /// The room's light, filtered the way True Tone and auto-brightness filter theirs, so the red never chases the
-    /// sensor: a reading every half second, kept as two averages of its logarithm — a quick one (2 s) and a slow one
-    /// (8 s). Nothing moves until both agree the room is more than 30 % brighter or darker than the level in use, and
-    /// have kept agreeing for 5 s (brighter) or 8 s (darker): a passing shadow, a hand over the sensor or a flash on
-    /// screen never gets that far. Then `room <lux>` sets the new level and the change is drawn over 10–40 s (see
-    /// drawLook); while it plays out, and for 5 s after, the screen's own changing light can't start another.
+    /// The room's light. At night a room is dark, dim or lit — in a dark room the sensor mostly sees the screen's own
+    /// light coming back, swinging between 0 and 5 lux as the page changes, so a level that tracked lux swung with it.
+    /// The reading is filtered the way True Tone and auto-brightness filter theirs: every half second, kept as a quick
+    /// (2 s) and a slow (8 s) average; a new kind only when both are past its margin (the same as the engine's
+    /// `roomKind`: wide, so only a lamp going on or off crosses one), and have stayed past it for 5 s (brighter) or
+    /// 12 s (darker). Then `room <kind> <lux>` sets that kind's level, drawn over 10–40 s (see drawLook); while it plays
+    /// out, and for 5 s after, the screen's own changing light can't start another.
     private let roomSensor = RoomSensor()
     private var roomInFlight = false
     private var luxFast: Double?, luxSlow: Double?
-    private var roomPending = 0, roomPendingSince = Date.distantPast, roomQuietUntil = Date.distantPast
+    private var roomPending: String?, roomPendingSince = Date.distantPast, roomQuietUntil = Date.distantPast
+    static func roomKind(lux: Double, was: String?) -> String {
+        switch was {
+        case "dark": return lux > 30 ? "lit" : lux > 8 ? "dim" : "dark"
+        case "dim":  return lux > 22 ? "lit" : lux < 4 ? "dark" : "dim"
+        case "lit":  return lux < 4 ? "dark" : lux < 15 ? "dim" : "lit"
+        default:     return lux < 5 ? "dark" : lux < 20 ? "dim" : "lit"
+        }
+    }
     func watchRoom() {
         guard !roomInFlight, !isOff, !isPaused, config.roomLight?.enabled ?? true,
-              isNight || isFading || (shade.warmth ?? 0) > 0.001 else { luxFast = nil; luxSlow = nil; roomPending = 0; return }   // by day: nothing to set
-        let committed = state?.room.flatMap { $0.lux >= 0 ? $0.lux : nil }
+              isNight || isFading || (shade.warmth ?? 0) > 0.001 else { luxFast = nil; luxSlow = nil; roomPending = nil; return }
+        let was = state?.room?.kind
         guard let lux = roomSensor.lux() else {
-            luxFast = nil; luxSlow = nil; roomPending = 0
-            if committed != nil { sendRoom("none") }                 // lid closed: back to the schedule's own level
+            luxFast = nil; luxSlow = nil; roomPending = nil
+            if was != nil { sendRoom(["none"]) }                     // lid closed: back to the schedule's own level
             return
         }
-        // log(lux + 3): equal steps for equal ratios, with the dark end's sensor noise (2 lux against 3) damped
         let x = log10(lux + 3)
         luxFast = luxFast.map { $0 + (x - $0) * (1 - exp(-0.5 / 2)) } ?? x
         luxSlow = luxSlow.map { $0 + (x - $0) * (1 - exp(-0.5 / 8)) } ?? x
-        guard let c = committed else { sendRoom(String(format: "%.1f", lux)); return }   // the first reading sets the room
-        guard Date() >= roomQuietUntil, let f = luxFast, let sl = luxSlow else { roomPending = 0; return }
-        let cx = log10(c + 3), band = 0.115                          // ±30 %
-        let dir = (f - cx > band && sl - cx > band) ? 1 : (cx - f > band && cx - sl > band) ? -1 : 0
-        if dir == 0 { roomPending = 0; return }
-        if dir != roomPending { roomPending = dir; roomPendingSince = Date(); return }
-        guard Date().timeIntervalSince(roomPendingSince) >= (dir > 0 ? 5 : 8) else { return }
-        roomPending = 0
-        sendRoom(String(format: "%.1f", max(0, pow(10, sl) - 3)))
+        let fast = pow(10, luxFast!) - 3, slow = pow(10, luxSlow!) - 3
+        guard let current = was else { sendRoom([Self.roomKind(lux: lux, was: nil), String(format: "%.1f", lux)]); return }
+        guard Date() >= roomQuietUntil else { roomPending = nil; return }
+        let a = Self.roomKind(lux: fast, was: current), b = Self.roomKind(lux: slow, was: current)
+        guard a == b, a != current else { roomPending = nil; return }
+        if roomPending != a { roomPending = a; roomPendingSince = Date(); return }
+        let order = ["dark", "dim", "lit"], brighter = order.firstIndex(of: a)! > order.firstIndex(of: current)!
+        guard Date().timeIntervalSince(roomPendingSince) >= (brighter ? 5 : 12) else { return }
+        roomPending = nil
+        sendRoom([a, String(format: "%.1f", slow)])
     }
-    private func sendRoom(_ arg: String) {
+    private func sendRoom(_ args: [String]) {
         roomInFlight = true
         liveQueue.async { [weak self] in
-            _ = runStatus(cliURL.path, ["room", arg])
+            _ = runStatus(cliURL.path, ["room"] + args)
             DispatchQueue.main.async { guard let self = self else { return }
                 self.roomInFlight = false; self.refresh()
                 self.roomQuietUntil = Date().addingTimeInterval((self.shade.ease ?? 0) + 5) }
@@ -1245,6 +1262,8 @@ final class Model: ObservableObject {
         easeTimer?.invalidate(); easeTimer = nil; tintDrawn = nil
     }
     var isNight: Bool { state?.mode == "night" }
+    /// The kind of room the red is set for now, while Match Room Light has one.
+    var roomKindNow: String? { (config.roomLight?.enabled ?? true) ? state?.room?.kind : nil }
     var isPaused: Bool { if let u = state?.pausedUntil { return u > Date() }; return false }
     var isFading: Bool { state?.ramp != nil }
     var sunriseText: String { switchTime(0) }
@@ -1422,7 +1441,6 @@ final class Model: ObservableObject {
             }
         }
         if let v = l.keyboardBrightness { lastKeyboard = v } else { l.keyboardBrightness = lastKeyboard ?? live.keyboardBrightness }
-        plannedWarmth = line.split(separator: " ").first { $0.hasPrefix("planned=") }.flatMap { Double($0.dropFirst(8)) }
         live = l
         syncKeyboardHold()
         if ProcessInfo.processInfo.environment["MIDNIGHT_DEBUG"] != nil {
@@ -1881,7 +1899,10 @@ struct Panel: View {
         guard m.enabled else { return "Off" }
         if let app = m.heldFor { return "True color while \(app) is in front" }
         if m.isFading { return m.isNight ? "Sunset in progress" : "Sunrise in progress" }
-        if m.isNight { return m.sunriseText.isEmpty ? "Night" : "Night · Sunrise at \(m.sunriseText)" }
+        if m.isNight {
+            let room = m.roomKindNow.map { " · \($0.capitalized) room" } ?? ""
+            return m.sunriseText.isEmpty ? "Night\(room)" : "Night\(room) · Sunrise at \(m.sunriseText)"
+        }
         return m.sunsetText.isEmpty ? "Day" : "Day · Sunset at \(m.sunsetText)"
     }
     /// What applying it would change nothing of. A preset without a keyboard or shade value leaves those alone when
@@ -1891,7 +1912,7 @@ struct Panel: View {
         let kbOK = s.keyboardBrightness.map { abs(kbTicks($0) - kbTicks(m.live.keyboardBrightness)) < 1 } ?? true
         let shadeOK = (s.shadeEnabled ?? m.shade.enabled) == m.shade.enabled
             && (!m.shade.enabled || s.shadeLevel.map { abs($0 - m.shade.level) < 0.02 } ?? true)
-        let warmOK = abs((s.warmth ?? 0) - (m.plannedWarmth ?? m.live.warmth ?? 0)) < 0.03     // a dark room's lift isn't a change of preset
+        let warmOK = abs((s.warmth ?? 0) - (m.live.warmth ?? 0)) < 0.03
         return kbOK && shadeOK && warmOK
     }
     @State private var newName = ""
@@ -1981,7 +2002,7 @@ struct SettingsPage: View {
                 var r = m.config.roomLight ?? RoomLight(); r.enabled = $0; m.config.roomLight = r
                 m.saveConfig(reapply: false); m.runCLI(["room"])           // queued behind the save: on eases to the room, off draws your level
             }), drawn: m.snapshotMode)
-            TextRow(text: "Off in a lit room, redder as it gets darker", secondary: true)
+            TextRow(text: roomLevelsText, secondary: true)
             Line()
 
             Header(text: "Learning")
@@ -2018,6 +2039,12 @@ struct SettingsPage: View {
         .padding(.horizontal, CC.side)
         .onAppear { lat = String(m.config.latitude); lon = String(m.config.longitude) }
         .onDisappear { m.stopRecording() }
+    }
+    /// The level each kind of room has: what you last chose there, at night.
+    var roomLevelsText: String {
+        let l = (m.config.roomLight ?? RoomLight()).levels
+        func f(_ v: Double) -> String { v > 0.001 ? "\(Int((v * 100).rounded()))%" : "Off" }
+        return "Remembers your Red Shift for each kind of room: dark \(f(l.dark)), dim \(f(l.dim)), lit \(f(l.lit))"
     }
     var locationLabel: String {
         let c = String(format: "%.2f, %.2f", m.config.latitude, m.config.longitude)

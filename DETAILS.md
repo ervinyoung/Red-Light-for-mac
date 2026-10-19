@@ -80,7 +80,7 @@ The following table lists the commands:
 | `redlight learned`, `redlight forget` | Show or clear the defaults that Red Light adopted. |
 | `redlight hold Figma` | Show true color while a color-sensitive app is in front. |
 | `redlight release` | Restore the red after a hold. |
-| `redlight room` | Read the light sensor and set Red Shift for the room. The app runs `redlight room <lux>` with its filtered reading when the room's light settles at a new level. |
+| `redlight room` | Read the light sensor and set Red Shift for the kind of room. The app runs `redlight room dark`, `dim`, or `lit` when the room's light settles. |
 | `redlight curve` | Print the Red Shift curve. |
 
 While the switch is off, the `pause`, `set`, `preset apply`, and `shade` commands return an error. Turn the
@@ -110,35 +110,37 @@ tint; `shade.json` stores both.
 
 ### Room light
 
-At night, Red Light reads your Mac's ambient light sensor and sets Red Shift from your room's light:
+At night, Red Light reads your Mac's ambient light sensor and sorts your room into one of three kinds: dark,
+dim, or lit. Each kind has its own Red Shift level:
 
-| Room light | Red Shift |
-| --- | --- |
-| 20 lux or more, a lit room | Off |
-| 10 lux, a dim lamp | 22% |
-| 2 lux | 45% |
-| Dark | 60% |
+| Room | Light | Red Shift by default |
+| --- | --- | --- |
+| Dark | Under about 4 lux: lamps off, the screen is the main light | 65% |
+| Dim | About 4–20 lux: a lamp across the room | 25% |
+| Lit | Over about 20 lux: the room lights are on | Off |
+
+In a dark room, the sensor mostly measures your screen's own light reflected back, so the reading moves
+between 0 and 5 lux as the page changes. Sorting rooms into kinds with wide margins between them means
+only a lamp turning on or off changes the level, not what's on screen.
+
+When you move the Red Shift slider at night, or apply a preset, Red Light remembers that level for the kind
+of room you're in. For example, if you set 70% in a dark room, every dark room after that gets 70%. To see
+the levels, open **Red Light Settings**. The panel shows the current kind of room under its title.
 
 Red Light filters the sensor the way True Tone and auto-brightness do, so changes are hard to notice:
 
 - It reads the sensor twice a second and keeps a fast average (2 seconds) and a slow average (8 seconds).
-- It ignores any change within 30% of the current light level.
-- It waits until both averages agree, and the new level holds for 5 seconds (brighter) or 8 seconds (darker).
-  A passing shadow, a hand over the sensor, or a flash on screen never gets that far.
+- It changes the kind of room only when both averages agree, and the new light holds for 5 seconds
+  (brighter) or 12 seconds (darker). A passing shadow, a hand over the sensor, or a flash on screen never
+  gets that far.
 - It draws the change continuously, starting and ending gently, over 10 to 40 seconds depending on its size.
 - While a change plays out, and for 5 seconds after, the screen's own changing light can't start another one.
 
 The level follows the sunset and sunrise fades, so it never jumps at a transition, and each minute's fade step is
-drawn across the minute, too. By day, while paused, and with
-the lid closed, Red Shift is your own level.
-
-The slider shows the level you see. Moving it shifts the room's curve for the rest of the night: above the
-room's level by the difference, and below it in proportion, so 0 is off in any room. Red Light learns from
-these shifts. For example, if you raise the level by 10% on three nights, the curve starts 10% higher.
+drawn across the minute, too. By day, while paused, and with the lid closed, Red Shift is your own level.
 
 To turn room light off, in **Red Light Settings**, turn off **Match Room Light**, or set
-`roomLight.enabled` to `false` in `config.json`. To scale the room's levels, set `roomLight.strength` from 0
-to 1. The default is 1.
+`roomLight.enabled` to `false` in `config.json`. The levels are `roomLight.levels.dark`, `dim`, and `lit`.
 
 ## Sunset and sunrise
 
