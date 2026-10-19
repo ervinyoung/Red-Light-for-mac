@@ -1040,6 +1040,8 @@ case "preset":
     case "save":
         guard !name.isEmpty else { print("usage: redlight preset save <name> [sf-symbol]"); exit(2) }
         var cur = readCurrent()
+        // The red on screen, not the schedule's beneath a room's level: "the current look" is what you're looking at.
+        cur.warmth = loadShade().warmth.map { ($0 * 100).rounded() / 100 } ?? cur.warmth
         cur.filterType = nil; cur.hue = nil; cur.keyboardAutoBrightness = nil; cur.filterEnabled = nil; cur.intensity = nil
         if cur.keyboardBrightness == nil { cur.keyboardBrightness = cfg.night.keyboardBrightness }
         let icon = CommandLine.arguments.count > 4 ? CommandLine.arguments[4] : "star.fill"
@@ -1049,7 +1051,7 @@ case "preset":
         presets.insert(Preset(name: name, icon: icon, settings: cur), at: min(at, presets.count))
         c.presets = presets
         if c.nightPresetName?.lowercased() == name.lowercased() { c.nightPresetName = nil }
-        saveConfig(c); print("saved preset \(name): \(describe(cur))")
+        saveConfig(c); log("saved preset \(name): \(describe(cur))")
     case "night":
         guard let p = find() else { print("no preset named \(name)"); exit(1) }
         c.night.warmth = p.settings.warmth ?? 0
