@@ -1899,7 +1899,7 @@ struct Panel: View {
         guard m.enabled else { return "Off" }
         if let app = m.heldFor { return "True color while \(app) is in front" }
         if m.isFading { return m.isNight ? "Sunset in progress" : "Sunrise in progress" }
-        if m.isNight {
+        if m.isNight && !m.snapshotDaylight {                         // the daytime documentation image says Day, too
             let room = m.roomKindNow.map { " · \($0.capitalized) room" } ?? ""
             return m.sunriseText.isEmpty ? "Night\(room)" : "Night\(room) · Sunrise at \(m.sunriseText)"
         }
