@@ -2043,7 +2043,7 @@ struct SettingsPage: View {
     /// The level each kind of room has: what you last chose there, at night.
     var roomLevelsText: String {
         let l = (m.config.roomLight ?? RoomLight()).levels
-        func f(_ v: Double) -> String { v > 0.001 ? "\(Int((v * 100).rounded()))%" : "Off" }
+        func f(_ v: Double) -> String { v > 0.001 ? "\(Int((v * 100).rounded()))%" : "off" }
         return "Remembers your Red Shift for each kind of room: dark \(f(l.dark)), dim \(f(l.dim)), lit \(f(l.lit))"
     }
     var locationLabel: String {
