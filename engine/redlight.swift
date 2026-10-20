@@ -96,7 +96,7 @@ struct RoomLight: Codable {
     }
 }
 struct RoomLevels: Codable {
-    var dark = 0.65, dim = 0.25, lit = 0.0
+    var dark = 0.45, dim = 0.25, lit = 0.0
     init() {}
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self), z = RoomLevels.init()
@@ -591,7 +591,7 @@ func nightPreset(cfg: Config, learned: Learned) -> Settings {
     if let v = learned.nightIdleDimSeconds { s.keyboardIdleDimSeconds = v }
     if let v = learned.nightShadeLevel { s.shadeLevel = v }
     if let v = learned.nightWarmth { s.warmth = v }
-    if s.warmth == nil { s.warmth = 0.8 }
+    if s.warmth == nil { s.warmth = 0.45 }
     s.filterEnabled = nil; s.intensity = nil; s.filterType = nil; s.hue = nil   // warmth drives the filter
     s.keyboardAutoBrightness = false
     if s.shadeEnabled != true { s.shadeEnabled = nil; s.shadeLevel = nil }

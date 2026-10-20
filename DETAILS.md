@@ -104,7 +104,7 @@ Red Shift uses each method where it works best:
 | 0–60% | Channel scaling only. Blue goes from 100% to 0%, and green goes down to 60%. Text is most legible in this range. |
 | 60–100% | Blue stays at 0%. Green goes down to 35%, and a brightness-preserving tint of up to 50% adds the removed green back as red brightness. |
 
-At 60%, the display shows no blue and no tint. The default at night is 80%. In the configuration and the
+At 60%, the display shows no blue and no tint. By default, night is 45% Red Shift, the keyboard at Extra Dim 2, and keys off after 30 seconds of inactivity. In the configuration and the
 command line, Red Shift is called `warmth`. The menu bar app draws the gamma table, and the engine sets the
 tint; `shade.json` stores both.
 
@@ -115,7 +115,7 @@ dim, or lit. Each kind has its own Red Shift level:
 
 | Room | Light | Red Shift by default |
 | --- | --- | --- |
-| Dark | Under about 4 lux: lamps off, the screen is the main light | 65% |
+| Dark | Under about 4 lux: lamps off, the screen is the main light | 45% |
 | Dim | About 4–20 lux: a lamp across the room | 25% |
 | Lit | Over about 20 lux: the room lights are on | Off |
 

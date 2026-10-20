@@ -32,7 +32,7 @@ struct Preset: Codable, Identifiable { var name: String; var icon: String; var s
 struct TrueColor: Codable { var ask = true; var always: [String] = []; var never: [String] = [] }
 /// Let the room's light set Red Shift at night: the level you last chose in each kind of room (the engine's `roomKind`).
 struct RoomLight: Codable { var enabled = true; var levels = RoomLevels() }
-struct RoomLevels: Codable { var dark = 0.65; var dim = 0.25; var lit = 0.0 }
+struct RoomLevels: Codable { var dark = 0.45; var dim = 0.25; var lit = 0.0 }
 struct Config: Codable {
     var latitude: Double; var longitude: Double; var locationSource: String?; var fadeMinutes: Double?
     var night: Settings; var dayDefaults: Settings
@@ -604,13 +604,13 @@ enum Setup {
         let json = """
         {
           "latitude": \(String(format: "%.2f", la)), "longitude": \(String(format: "%.2f", lo)), "locationSource": "timezone", "fadeMinutes": 30,
-          "night": { "warmth": 0.8, "keyboardBrightness": 0.003, "keyboardIdleDimSeconds": 5, "keyboardAutoBrightness": false, "shadeEnabled": false, "shadeLevel": 0.3 },
+          "night": { "warmth": 0.45, "keyboardBrightness": 0.000074, "keyboardIdleDimSeconds": 30, "keyboardAutoBrightness": false, "shadeEnabled": false, "shadeLevel": 0.3 },
           "dayDefaults": { "warmth": 0, "keyboardBrightness": 0.3, "keyboardIdleDimSeconds": 300, "keyboardAutoBrightness": true },
           "learning": { "enabled": true, "minNights": 3, "lookbackDays": 14, "maxOffsetMinutes": 120 },
           "nightPresetName": "Night",
           "presets": [
             { "name": "Dusk",       "icon": "sunset.fill",   "settings": { "warmth": 0.6, "keyboardBrightness": 0.01,  "keyboardIdleDimSeconds": 30, "shadeEnabled": false, "shadeLevel": 0.2 } },
-            { "name": "Night",      "icon": "moon.fill",     "settings": { "warmth": 0.8, "keyboardBrightness": 0.003, "keyboardIdleDimSeconds": 5,  "shadeEnabled": false, "shadeLevel": 0.2 } },
+            { "name": "Night",      "icon": "moon.fill",     "settings": { "warmth": 0.45, "keyboardBrightness": 0.000074, "keyboardIdleDimSeconds": 30, "shadeEnabled": false, "shadeLevel": 0.2 } },
             { "name": "Deep night", "icon": "moon.zzz.fill", "settings": { "warmth": 1.0, "keyboardBrightness": 0.000074, "keyboardIdleDimSeconds": 5,  "shadeEnabled": true,  "shadeLevel": 0.4 } },
             { "name": "Movie",      "icon": "film.fill",     "settings": { "warmth": 0.6, "keyboardBrightness": 0.0,   "keyboardIdleDimSeconds": 5,  "shadeEnabled": true,  "shadeLevel": 0.4 } }
           ],
