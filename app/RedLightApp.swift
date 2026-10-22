@@ -1181,7 +1181,10 @@ final class Model: ObservableObject {
             _ = runStatus(cliURL.path, ["room"] + args)
             DispatchQueue.main.async { guard let self = self else { return }
                 self.roomInFlight = false; self.refresh()
-                self.roomQuietUntil = Date().addingTimeInterval((self.shade.ease ?? 0) + 5) }
+                // What is left of the ease on screen, not its length: shade.json keeps `ease` after one ends (the fade's
+                // last step leaves 60 s all night), so a call that moved nothing kept the room unwatched for 65 s.
+                let left = (self.shade.easeAt ?? 0) + (self.shade.ease ?? 0) - Date().timeIntervalSince1970
+                self.roomQuietUntil = Date().addingTimeInterval(max(0, left) + 5) }
         }
     }
     func refresh() {
