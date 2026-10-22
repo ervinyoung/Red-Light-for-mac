@@ -113,7 +113,9 @@ enum Tint {
     private static func sym<T>(_ n: String, _ t: T.Type) -> T? { ma.flatMap { dlsym($0, n) }.map { unsafeBitCast($0, to: t) } }
     private static let setEnabled = sym("MADisplayFilterPrefSetCategoryEnabled", (@convention(c) (Int, Bool) -> Void).self)
     private static let setIntensity = sym("MADisplayFilterPrefSetSingleColorIntensity", (@convention(c) (Double) -> Void).self)
-    static func set(_ t: Double) { setIntensity?(t); setEnabled?(1, t > 0.001) }
+    /// Never from a `--snapshot` run (like Gamma): one taken while the engine writes an eased step started an ease of its
+    /// own, whose frames wrote the real display's tint against the running app's.
+    static func set(_ t: Double) { guard !isSnapshotRun else { return }; setIntensity?(t); setEnabled?(1, t > 0.001) }
 }
 
 /// Same curve as the engine, kept here only so a slider drag can paint the gamma legs without waiting on a process.
@@ -1199,7 +1201,10 @@ final class Model: ObservableObject {
             _ = runStatus(cliURL.path, ["room"] + args)
             DispatchQueue.main.async { guard let self = self else { return }
                 self.roomInFlight = false; self.refresh()
-                self.roomQuietUntil = Date().addingTimeInterval((self.shade.ease ?? 0) + 5) }
+                // What is left of the ease on screen, not its length: shade.json keeps `ease` after one ends (the fade's
+                // last step leaves 60 s all night), so a call that moved nothing kept the room unwatched for 65 s.
+                let left = (self.shade.easeAt ?? 0) + (self.shade.ease ?? 0) - Date().timeIntervalSince1970
+                self.roomQuietUntil = Date().addingTimeInterval(max(0, left) + 5) }
         }
     }
     func refresh() {
@@ -1213,7 +1218,9 @@ final class Model: ObservableObject {
         state = (try? Data(contentsOf: stateURL)).flatMap { try? dec.decode(ModeState.self, from: $0) }
         learned = (try? Data(contentsOf: learnedURL)).flatMap { try? dec.decode(Learned.self, from: $0) } ?? Learned()
         var sh = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? Shade()
-        if setsInFlight > 0 { sh.warmth = shade.warmth; sh.gammaBlue = shade.gammaBlue; sh.gammaGreen = shade.gammaGreen; sh.ease = nil; sh.easeAt = nil }
+        // The ease fields stay this model's too, not nil: a keyboard or idle `set` counts here as well, and a refresh while
+        // one was queued cut a running room ease or fade step short, the warmth jumping to its end. (setWarmth clears them.)
+        if setsInFlight > 0 { sh.warmth = shade.warmth; sh.gammaBlue = shade.gammaBlue; sh.gammaGreen = shade.gammaGreen; sh.ease = shade.ease; sh.easeAt = shade.easeAt; sh.tintDeferred = shade.tintDeferred }
         if shadesInFlight > 0 { sh.enabled = shade.enabled; sh.level = shade.level }     // likewise for setShade()
         shade = sh
         if switchesInFlight == 0 { enabled = !(state?.disabled ?? false) }
@@ -1256,6 +1263,10 @@ final class Model: ObservableObject {
                     easeTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.easeStep() }
                     return
                 }
+                // Drawn at once instead (just launched, so nothing drawn to ease from; or read after its end): the tint
+                // leg the engine left to us goes with the gamma legs. Left alone it stayed at the old warmth's until the
+                // engine's settleTint or the next eased step: a minute or more of tint and gamma out of step.
+                if shade.tintDeferred == true { Tint.set(warmthCurve(target).tint) }
             }
         }
         stopEase()
@@ -1276,9 +1287,11 @@ final class Model: ObservableObject {
         if t >= 1 { stopEase() }
     }
     private func stopEase(finish: Bool = true) {
-        // An ease cut short leaves the tint leg where the engine meant it to end, not part-way — unless it was cut short
-        // by off or true colour, whose tint is the engine's (none).
-        if finish && easeTimer != nil && easeTint && shade.tintDeferred == true { Tint.set(warmthCurve(easeTo).tint) }
+        // An ease cut short leaves the tint leg where the look now drawn wants it, not part-way — unless it was cut short
+        // by off or true colour, whose tint is the engine's (none). For a direct change too (a preset, a pause, the
+        // slider): a frame drawn after the engine set its tint and before this refresh put the ease's own back over it,
+        // left all night; and the old ease's end, written under a slider drag, flashed until the engine's `set` landed.
+        if finish && easeTimer != nil && easeTint { Tint.set(warmthCurve(shade.warmth ?? 0).tint) }
         easeTimer?.invalidate(); easeTimer = nil; tintDrawn = nil
     }
     var isNight: Bool { state?.mode == "night" }
