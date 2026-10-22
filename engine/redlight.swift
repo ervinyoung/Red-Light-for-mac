@@ -808,7 +808,10 @@ func lifted(_ w: Double) -> Double {
 /// themselves) and the look is a night one: an off or paused look (no red) keeps its own keys, and so does
 /// auto-brightness. Nil when the room doesn't set the keys.
 func roomKeyboard(for s: Settings) -> Double? {
-    guard roomActive, roomNightness >= 0.999, let kind = roomKindNow, s.keyboardAutoBrightness != true,
+    // A look that doesn't say (the room's own redraw) goes by the keys as they are: auto-brightness you turned on at
+    // night was switched off by the next lamp going on or off.
+    guard roomActive, roomNightness >= 0.999, let kind = roomKindNow,
+          (s.keyboardAutoBrightness ?? kbIDs().first.map { kbGetBool("isAutoBrightnessEnabledForKeyboard:", $0) } ?? false) != true,
           (s.warmth ?? loadShade().base ?? 0) > 0.001 else { return nil }
     return roomKeys[kind: kind]
 }
