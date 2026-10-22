@@ -870,12 +870,14 @@ final class KeyboardHold {
     private typealias SetFn = @convention(c) (AnyObject, Selector, Float, Int32, Bool, UInt64) -> Bool
     private typealias GetFn = @convention(c) (AnyObject, Selector, UInt64) -> Float
     private typealias SuspendFn = @convention(c) (AnyObject, Selector, Bool, UInt64) -> Bool
+    private typealias AutoFn = @convention(c) (AnyObject, Selector, UInt64) -> Bool
     private let q = DispatchQueue(label: "redlight.keyboard")
     private var timer: DispatchSourceTimer?
     private var client: NSObject?, id: UInt64 = 0
-    private var setFn: SetFn?, getFn: GetFn?, suspendFn: SuspendFn?
+    private var setFn: SetFn?, getFn: GetFn?, suspendFn: SuspendFn?, autoFn: AutoFn?
     private let setSel = NSSelectorFromString("setBrightness:fadeSpeed:commit:forKeyboard:"), getSel = NSSelectorFromString("brightnessForKeyboard:")
     private let suspendSel = NSSelectorFromString("suspendIdleDimming:forKeyboard:")
+    private let autoSel = NSSelectorFromString("isAutoBrightnessEnabledForKeyboard:")
     private var backlight: io_service_t = 0
     // q only
     private var want = Want.none, idle = 5.0, asleep = false, lit = true, suspended = false
@@ -892,6 +894,7 @@ final class KeyboardHold {
         if c.responds(to: setSel) { setFn = unsafeBitCast(c.method(for: setSel), to: SetFn.self) }
         if c.responds(to: getSel) { getFn = unsafeBitCast(c.method(for: getSel), to: GetFn.self) }
         if c.responds(to: suspendSel) { suspendFn = unsafeBitCast(c.method(for: suspendSel), to: SuspendFn.self) }
+        if c.responds(to: autoSel) { autoFn = unsafeBitCast(c.method(for: autoSel), to: AutoFn.self) }
         backlight = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceNameMatching("kbd-backlight"))
         markIdle(false)
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [weak self] _ in
@@ -997,6 +1000,10 @@ final class KeyboardHold {
             var ours: Double = 0
             if case .level(let l) = want { ours = l }
             if v > 0.0015, abs(v - ours) > 0.002, Float(v) != lastValue {
+                // Unless auto-brightness has just come on (System Settings, or the engine handing the keys back at a pause
+                // or sunrise before the pane has heard): that level is macOS's. Recorded, it would `set keyboard`, which
+                // switches auto-brightness straight back off. Give the keys back; the next refresh says .none too.
+                if let a = autoFn, a(c, autoSel, id) { want = .none; up = false; fastDown = false; setSuspended(false); schedule(); return }
                 want = .level(v); lastValue = Float(v); up = false; fastDown = false; schedule()
                 let cb = onOverride; DispatchQueue.main.async { cb?(v) }; return
             }
