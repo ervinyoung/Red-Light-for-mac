@@ -1113,7 +1113,12 @@ case "preset":
         saveConfig(c)
         var l = learned; l.nightKeyboardBrightness = nil; l.nightIdleDimSeconds = nil; l.nightShadeLevel = nil; l.nightWarmth = nil; l.levelsSince = now; saveLearned(l)
         log("sunset preset is now '\(p.name)'")
-        if var st = loadState(), st.mode == "night", st.pausedUntil == nil, st.disabled != true { st.ramp = nil; holdTint = st.heldFor != nil; apply(nightPreset(cfg: c, learned: l), label: "NIGHT (preset changed)"); st.lastSeen = readCurrent(); saveState(st) }
+        if var st = loadState(), st.mode == "night", st.pausedUntil == nil, st.disabled != true {
+            // The fade is over, so night has fully arrived: the room's level was set for the fade's progress, and a
+            // sunset preset chosen part-way through left the red at that fraction of the room's level all night.
+            st.ramp = nil; roomNightness = nightness(st, now: now); holdTint = st.heldFor != nil
+            apply(nightPreset(cfg: c, learned: l), label: "NIGHT (preset changed)"); st.lastSeen = readCurrent(); saveState(st)
+        }
     case "delete":
         guard find() != nil else { print("no preset named \(name)"); exit(1) }
         presets.removeAll { $0.name.lowercased() == name.lowercased() }
@@ -1139,7 +1144,7 @@ case "shade":
     print("shade \(sh.enabled ? "on" : "off") \(Int((sh.level * 100).rounded()))%")
 case "reapply":
     if var st = loadState(), st.mode == "night", st.pausedUntil == nil, st.disabled != true {
-        st.ramp = nil; holdTint = st.heldFor != nil
+        st.ramp = nil; roomNightness = nightness(st, now: now); holdTint = st.heldFor != nil   // full night now, as above
         apply(nightPreset(cfg: cfg, learned: learned), label: "NIGHT (preset edited)")
         st.lastSeen = readCurrent(); saveState(st)
     }
