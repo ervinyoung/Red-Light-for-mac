@@ -1195,7 +1195,9 @@ final class Model: ObservableObject {
         state = (try? Data(contentsOf: stateURL)).flatMap { try? dec.decode(ModeState.self, from: $0) }
         learned = (try? Data(contentsOf: learnedURL)).flatMap { try? dec.decode(Learned.self, from: $0) } ?? Learned()
         var sh = (try? Data(contentsOf: shadeURL)).flatMap { try? dec.decode(Shade.self, from: $0) } ?? Shade()
-        if setsInFlight > 0 { sh.warmth = shade.warmth; sh.gammaBlue = shade.gammaBlue; sh.gammaGreen = shade.gammaGreen; sh.ease = nil; sh.easeAt = nil }
+        // The ease fields stay this model's too, not nil: a keyboard or idle `set` counts here as well, and a refresh while
+        // one was queued cut a running room ease or fade step short, the warmth jumping to its end. (setWarmth clears them.)
+        if setsInFlight > 0 { sh.warmth = shade.warmth; sh.gammaBlue = shade.gammaBlue; sh.gammaGreen = shade.gammaGreen; sh.ease = shade.ease; sh.easeAt = shade.easeAt; sh.tintDeferred = shade.tintDeferred }
         if shadesInFlight > 0 { sh.enabled = shade.enabled; sh.level = shade.level }     // likewise for setShade()
         shade = sh
         if switchesInFlight == 0 { enabled = !(state?.disabled ?? false) }
