@@ -842,21 +842,23 @@ func rememberRoomLevel(_ x: Double) {
 func senseRoom(_ st: inout State, now: Date, kind given: String? = nil, lux luxGiven: Double? = nil) -> Bool {
     let enabled = roomEnabled
     let lux = enabled ? (luxGiven ?? (given == nil ? roomLux() : nil)) : nil
-    let kind = enabled ? (given ?? lux.map { roomKind(lux: $0, was: st.room?.kind) }) : nil
+    let kind = enabled ? (given ?? lux.map { roomKind(lux: $0, was: st.room?.kind) }) : nil, was = st.room?.kind
     if let kind = kind {
         let level = roomLevels[kind: kind]
         if st.room?.kind != kind { log(String(format: "%@ room%@: red shift %.0f%%", kind, lux.map { String(format: " (%.0f lux)", $0) } ?? "", level * 100)) }
         st.room = Room(lux: lux ?? st.room?.lux ?? -1, target: level, darkness: level, at: now, kind: kind)
         roomKindNow = kind; roomLevel = level; roomActive = true
     } else { st.room = nil; roomKindNow = nil; roomActive = false }
-    return roomOutOfDate()
+    // The keys only when the room changed: without the app this runs every minute, and put back each minute the
+    // level you had set with the brightness keys. (The app sends those as `set keyboard`, which the room remembers.)
+    return roomOutOfDate(keys: kind != was)
 }
 /// The red or the keys aren't what this room calls for.
-func roomOutOfDate() -> Bool {
+func roomOutOfDate(keys: Bool = true) -> Bool {
     let sh = loadShade()
     if abs(lifted(sh.base ?? sh.warmth ?? 0) - (sh.warmth ?? 0)) > 0.003 { return true }
     var probe = Settings(); probe.keyboardBrightness = 0
-    if let k = roomKeyboard(for: probe), let now = loadCommanded().keyboardBrightness, abs(kbTicksOf(k) - kbTicksOf(now)) > 0.5 { return true }
+    if keys, let k = roomKeyboard(for: probe), let now = loadCommanded().keyboardBrightness, abs(kbTicksOf(k) - kbTicksOf(now)) > 0.5 { return true }
     return false
 }
 /// Redraws the chosen warmth for the room, eased: 10 s for the smallest change, a further 6 s for every 10 % of Red
