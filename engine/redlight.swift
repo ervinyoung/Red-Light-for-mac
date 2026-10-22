@@ -167,7 +167,8 @@ struct JSONAny: Codable {
     }
 }
 /// A transition in progress: settings ease from `from` to `to` over `seconds`, one step per check.
-struct Ramp: Codable { var start: Date; var seconds: Double; var from: Settings; var to: Settings; var label: String }
+/// `keysPinned`: you set the keys during it (see `pin`), so its end leaves them to you rather than to the room.
+struct Ramp: Codable { var start: Date; var seconds: Double; var from: Settings; var to: Settings; var label: String; var keysPinned: Bool? = nil }
 struct State: Codable {
     var mode: String                    // "day" | "night" | "unset"
     var daySnapshot: Settings?
@@ -679,7 +680,7 @@ func pin(_ r: inout Ramp, _ fields: Set<String>, at cur: Settings) {
     if fields.contains("warmth") { r.from.warmth = cur.warmth; r.to.warmth = cur.warmth }
     if fields.contains("keyboardBrightness") {
         r.from.keyboardBrightness = cur.keyboardBrightness; r.to.keyboardBrightness = cur.keyboardBrightness
-        r.to.keyboardAutoBrightness = cur.keyboardAutoBrightness
+        r.to.keyboardAutoBrightness = cur.keyboardAutoBrightness; r.keysPinned = true
     }
     if fields.contains("keyboardIdleDimSeconds") { r.to.keyboardIdleDimSeconds = cur.keyboardIdleDimSeconds }
     if fields.contains("shadeEnabled") || fields.contains("shadeLevel") {
@@ -692,7 +693,12 @@ func stepRamp(_ st: inout State, now: Date) {
     let t = now.timeIntervalSince(r.start) / r.seconds
     roomNightness = nightness(st, now: now)
     // Each minute's step is drawn across the minute, so the fade is continuous rather than a step a minute.
-    if t >= 1 { apply(r.to, label: "\(r.label) 100%", ease: 60); st.ramp = nil }
+    if t >= 1 {
+        // Keys you set during the sunset fade stay where you put them: night arriving put the room's level over them at
+        // once. (They are already there, eased each minute; the room takes them over at its next change.)
+        var to = r.to; if r.keysPinned == true { to.keyboardBrightness = nil }
+        apply(to, label: "\(r.label) 100%", ease: 60); st.ramp = nil
+    }
     else { apply(blend(r.from, r.to, t), label: "\(r.label) \(Int(t * 100))%", quiet: true, ease: 60) }
     st.lastSeen = readCurrent()
 }
