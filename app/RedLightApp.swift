@@ -31,7 +31,9 @@ struct Preset: Codable, Identifiable { var name: String; var icon: String; var s
 /// True colour for colour-critical apps: ask, or remember per app (bundle identifiers).
 struct TrueColor: Codable { var ask = true; var always: [String] = []; var never: [String] = [] }
 /// Let the room's light set Red Shift at night: the level you last chose in each kind of room (the engine's `roomKind`).
-struct RoomLight: Codable { var enabled = true; var levels = RoomLevels() }
+struct RoomLight: Codable { var enabled = true; var levels = RoomLevels(); var keyboard = RoomKeys() }
+/// The keyboard backlight per kind of room (the engine's `RoomKeys`): Extra Dim 1 dark, Extra Dim 4 dim, 1 % lit.
+struct RoomKeys: Codable { var dark = 2.0 / 54 * 0.001; var dim = 21.0 / 54 * 0.001; var lit = 0.001 }
 struct RoomLevels: Codable { var dark = 0.45; var dim = 0.25; var lit = 0.0 }
 struct Config: Codable {
     var latitude: Double; var longitude: Double; var locationSource: String?; var fadeMinutes: Double?
@@ -63,6 +65,15 @@ extension RoomLight {
         self.init(); guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }
         enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? enabled
         levels = (try? c.decodeIfPresent(RoomLevels.self, forKey: .levels)) ?? levels
+        keyboard = (try? c.decodeIfPresent(RoomKeys.self, forKey: .keyboard)) ?? keyboard
+    }
+}
+extension RoomKeys {
+    init(from d: Decoder) throws {
+        self.init(); guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }
+        dark = (try? c.decodeIfPresent(Double.self, forKey: .dark)) ?? dark
+        dim = (try? c.decodeIfPresent(Double.self, forKey: .dim)) ?? dim
+        lit = (try? c.decodeIfPresent(Double.self, forKey: .lit)) ?? lit
     }
 }
 extension RoomLevels {
@@ -922,7 +933,9 @@ final class KeyboardHold {
             if wake { markIdle(false) }
             switch w {
             case .off: send(0, 250)
-            case .level(let v): if wake { lit = true; send(Float(v), 250) }          // immediately, whatever macOS thought of the keys
+            // Immediately, whatever macOS thought of the keys: quickly under your finger, over 2 s when the room or a
+            // fade moves them, so a lamp going off dims the keys as gently as it deepens the red.
+            case .level(let v): if wake { lit = true; send(Float(v), idleTime() < 1 ? 250 : 2000) }
             case .hold: if wake { lit = true }
             case .none: break
             }
@@ -2003,6 +2016,7 @@ struct SettingsPage: View {
                 m.saveConfig(reapply: false); m.runCLI(["room"])           // queued behind the save: on eases to the room, off draws your level
             }), drawn: m.snapshotMode)
             TextRow(text: roomLevelsText, secondary: true)
+            TextRow(text: roomKeysText, secondary: true)
             Line()
 
             Header(text: "Learning")
@@ -2045,6 +2059,10 @@ struct SettingsPage: View {
         let l = (m.config.roomLight ?? RoomLight()).levels
         func f(_ v: Double) -> String { v > 0.001 ? "\(Int((v * 100).rounded()))%" : "off" }
         return "Remembers your Red Shift for each kind of room: dark \(f(l.dark)), dim \(f(l.dim)), lit \(f(l.lit))"
+    }
+    var roomKeysText: String {
+        let k = (m.config.roomLight ?? RoomLight()).keyboard
+        return "And your keyboard backlight: dark \(fmtKeyboard(k.dark)), dim \(fmtKeyboard(k.dim)), lit \(fmtKeyboard(k.lit))"
     }
     var locationLabel: String {
         let c = String(format: "%.2f, %.2f", m.config.latitude, m.config.longitude)

@@ -123,8 +123,13 @@ In a dark room, the sensor mostly measures your screen's own light reflected bac
 between 0 and 5 lux as the page changes. Sorting rooms into kinds with wide margins between them means
 only a lamp turning on or off changes the level, not what's on screen.
 
-When you move the Red Shift slider at night, or apply a preset, Red Light remembers that level for the kind
-of room you're in. For example, if you set 70% in a dark room, every dark room after that gets 70%. To see
+The keyboard backlight follows the room, too: the darker the room, the dimmer the keys, since eyes adapted to
+the dark need the least light. By default, a dark room gets Extra Dim 1, a dim room Extra Dim 4, and a lit room
+macOS's minimum (1%). The keys change over 2 seconds, so a lamp turning off dims them as gently as it deepens
+the red. While auto-brightness is on, and during the sunset and sunrise fades, the keys are left alone.
+
+When you move the Red Shift or Keyboard Backlight slider at night, or apply a preset, Red Light remembers that
+level for the kind of room you're in. For example, if you set 70% in a dark room, every dark room after that gets 70%. To see
 the levels, open **Red Light Settings**. The panel shows the current kind of room under its title.
 
 Red Light filters the sensor the way True Tone and auto-brightness do, so changes are hard to notice:
@@ -140,7 +145,8 @@ The level follows the sunset and sunrise fades, so it never jumps at a transitio
 drawn across the minute, too. By day, while paused, and with the lid closed, Red Shift is your own level.
 
 To turn room light off, in **Red Light Settings**, turn off **Match Room Light**, or set
-`roomLight.enabled` to `false` in `config.json`. The levels are `roomLight.levels.dark`, `dim`, and `lit`.
+`roomLight.enabled` to `false` in `config.json`. The levels are `roomLight.levels` (Red Shift) and
+`roomLight.keyboard` (keyboard backlight), each with `dark`, `dim`, and `lit`.
 
 ## Sunset and sunrise
 

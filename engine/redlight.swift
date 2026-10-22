@@ -88,11 +88,29 @@ struct RoomLight: Codable {
     var enabled = true
     /// The Red Shift for each kind of room at night, as you last chose it there (see `roomKind`).
     var levels = RoomLevels()
+    /// The keyboard backlight for each kind of room at night, likewise: darker room, dimmer keys.
+    var keyboard = RoomKeys()
     init() {}
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? true
         levels = (try? c.decode(RoomLevels.self, forKey: .levels)) ?? RoomLevels()
+        keyboard = (try? c.decode(RoomKeys.self, forKey: .keyboard)) ?? RoomKeys()
+    }
+}
+/// Eyes adapted to a dark room need the least light on the keys: Extra Dim 1 in the dark, the top of the extra-dim
+/// range (Extra Dim 4) in a dim room, macOS's own minimum with the lights on.
+struct RoomKeys: Codable {
+    var dark = extraDimLevels[0], dim = extraDimLevels[3], lit = kbFloor
+    init() {}
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self), z = RoomKeys.init()
+        func v(_ k: CodingKeys, _ dflt: Double) -> Double { max(0, min(1, (try? c.decode(Double.self, forKey: k)) ?? dflt)) }
+        dark = v(.dark, z.dark); dim = v(.dim, z.dim); lit = v(.lit, z.lit)
+    }
+    subscript(kind kind: String) -> Double {
+        get { kind == "dark" ? dark : kind == "dim" ? dim : lit }
+        set { switch kind { case "dark": dark = newValue; case "dim": dim = newValue; default: lit = newValue } }
     }
 }
 struct RoomLevels: Codable {
@@ -296,6 +314,8 @@ func apply(_ s: Settings, label: String, quiet: Bool = false, ease: Double = 0) 
             saveShade(sh)
         }
     }
+    var s = s
+    if s.keyboardBrightness != nil, let k = roomKeyboard(for: s) { s.keyboardBrightness = k }
     for id in kbIDs() {
         if let d = s.keyboardIdleDimSeconds { kbSetIdleDim(d, id) }
         if let a = s.keyboardAutoBrightness { kbSetAuto(a, id) }
@@ -761,10 +781,10 @@ func roomKind(lux: Double, was: String?) -> String {
 /// The room's level, and whether there is a room to go by: no sensor reading means the schedule's own level, as
 /// without this feature — never off because the lid is closed.
 var roomLevel = 0.0, roomActive = false, roomNightness = 0.0, roomKindNow: String? = nil
-var roomLevels = RoomLevels(), roomEnabled = true
+var roomLevels = RoomLevels(), roomKeys = RoomKeys(), roomEnabled = true
 func setRoomContext(cfg: Config, learned: Learned, state: State?, now: Date) {
     let r = cfg.roomLight ?? RoomLight()
-    roomLevels = r.levels; roomEnabled = r.enabled
+    roomLevels = r.levels; roomKeys = r.keyboard; roomEnabled = r.enabled
     roomKindNow = r.enabled ? state?.room?.kind : nil
     roomActive = roomKindNow != nil
     roomLevel = roomKindNow.map { roomLevels[kind: $0] } ?? 0
@@ -783,6 +803,21 @@ func lifted(_ w: Double) -> Double {
     let w = max(0, min(1, w))
     guard roomActive, roomNightness > 0, w > 0.001 else { return w }
     return roomLevel * roomNightness
+}
+/// The keyboard level for this kind of room, once night has fully arrived (the sunset and sunrise fades ease the keys
+/// themselves) and the look is a night one: an off or paused look (no red) keeps its own keys, and so does
+/// auto-brightness. Nil when the room doesn't set the keys.
+func roomKeyboard(for s: Settings) -> Double? {
+    guard roomActive, roomNightness >= 0.999, let kind = roomKindNow, s.keyboardAutoBrightness != true,
+          (s.warmth ?? loadShade().base ?? 0) > 0.001 else { return nil }
+    return roomKeys[kind: kind]
+}
+/// Likewise for the keys: what you set at night in a kind of room is that room's keyboard level from then on.
+func rememberRoomKey(_ x: Double) {
+    guard roomActive, roomNightness >= 0.999, let kind = roomKindNow, var c = loadConfig() else { return }
+    var r = c.roomLight ?? RoomLight(); r.keyboard[kind: kind] = max(0, min(1, x))
+    c.roomLight = r; saveConfig(c); roomKeys = r.keyboard
+    log(String(format: "%@ room: keyboard %.6f from now on", kind, x))
 }
 /// What you set at night in a kind of room is that room's level from then on.
 func rememberRoomLevel(_ x: Double) {
@@ -805,8 +840,15 @@ func senseRoom(_ st: inout State, now: Date, kind given: String? = nil, lux luxG
         st.room = Room(lux: lux ?? st.room?.lux ?? -1, target: level, darkness: level, at: now, kind: kind)
         roomKindNow = kind; roomLevel = level; roomActive = true
     } else { st.room = nil; roomKindNow = nil; roomActive = false }
+    return roomOutOfDate()
+}
+/// The red or the keys aren't what this room calls for.
+func roomOutOfDate() -> Bool {
     let sh = loadShade()
-    return abs(lifted(sh.base ?? sh.warmth ?? 0) - (sh.warmth ?? 0)) > 0.003
+    if abs(lifted(sh.base ?? sh.warmth ?? 0) - (sh.warmth ?? 0)) > 0.003 { return true }
+    var probe = Settings(); probe.keyboardBrightness = 0
+    if let k = roomKeyboard(for: probe), let now = loadCommanded().keyboardBrightness, abs(kbTicksOf(k) - kbTicksOf(now)) > 0.5 { return true }
+    return false
 }
 /// Redraws the chosen warmth for the room, eased: 10 s for the smallest change, a further 6 s for every 10 % of Red
 /// Shift, 40 s at most. The tint leg can switch across 60 %, which is not a change of yours.
@@ -814,8 +856,13 @@ func reliftWarmth(_ st: inout State, eased: Bool = true) {
     let sh = loadShade(), base = sh.base ?? sh.warmth ?? 0
     let delta = abs(lifted(base) - (sh.warmth ?? 0))
     var s = Settings(); s.warmth = base
+    // The keys too, when the room sets them; the app fades them (slowly, since nobody is touching the slider).
+    if let k = roomKeyboard(for: s) { s.keyboardBrightness = k; s.keyboardAutoBrightness = false }
     apply(s, label: "ROOM", quiet: true, ease: eased ? min(40, 10 + 60 * delta) : 0)
-    st.lastSeen?.filterEnabled = readCurrent().filterEnabled
+    // Neither is a change of yours: the filter can switch across 60 %, and the keys are the room's.
+    let cur = readCurrent()
+    st.lastSeen?.filterEnabled = cur.filterEnabled
+    if s.keyboardBrightness != nil { st.lastSeen?.keyboardBrightness = cur.keyboardBrightness; st.lastSeen?.keyboardAutoBrightness = false }
 }
 
 // MARK: - Main
@@ -902,7 +949,7 @@ case "room":
     let arg = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : nil
     let luxArg = CommandLine.arguments.count > 3 ? Double(CommandLine.arguments[3]) : arg.flatMap(Double.init)
     let kindArg = ["dark", "dim", "lit"].contains(arg ?? "") ? arg : nil
-    let moved = arg == "none" ? { st.room = nil; roomKindNow = nil; roomActive = false; let sh = loadShade(); return abs(lifted(sh.base ?? sh.warmth ?? 0) - (sh.warmth ?? 0)) > 0.003 }()
+    let moved = arg == "none" ? { st.room = nil; roomKindNow = nil; roomActive = false; return roomOutOfDate() }()
                               : senseRoom(&st, now: now, kind: kindArg, lux: luxArg)
     if moved { reliftWarmth(&st) }
     saveState(st)
@@ -1006,6 +1053,7 @@ case "set":
             rememberRoomLevel(x); let sh = loadShade(); s.warmth = max(0.01, sh.base ?? sh.warmth ?? 0.01)
         } else { s.warmth = x }
     case "keyboard": s.keyboardAutoBrightness = false; s.keyboardBrightness = off ? 0 : max(0, min(1, num / 100))
+        if let b = s.keyboardBrightness { rememberRoomKey(b) }       // at night in a known kind of room: that room's keys
     case "idle":
         guard !off, num >= 1 else { print("idle needs a number of seconds (1 or more)"); exit(2) }
         s.keyboardIdleDimSeconds = num
@@ -1036,6 +1084,7 @@ case "preset":
         if s.keyboardBrightness != nil { s.keyboardAutoBrightness = false }
         // At night in a known kind of room, the preset's Red Shift becomes that room's level, like the slider.
         if roomActive && roomNightness > 0, let w = s.warmth { rememberRoomLevel(w); if w > 0.001 { s.warmth = max(w, 0.01) } }
+        if let b = s.keyboardBrightness { rememberRoomKey(b) }
         apply(s, label: "PRESET \(p.name)")
     case "save":
         guard !name.isEmpty else { print("usage: redlight preset save <name> [sf-symbol]"); exit(2) }
