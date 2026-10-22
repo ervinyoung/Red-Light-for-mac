@@ -992,7 +992,11 @@ case "hold":
     // Only the tint flag is ours to re-read: a whole fresh lastSeen swallowed a slider or shade change made in the
     // minute before, so the fade's next step ran straight over it (the app writes the shade before its release lands).
     if st.customTintHeld == nil {   // first hold of a run; a hold passed from one app to the next keeps it
-        st.customTintHeld = maGetEnabled(colorCategory) && maGetType(colorCategory) == 16 && warmthCurve(loadShade().warmth ?? 0).tint <= 0.001
+        // Not while the app eases the tint leg (`tintDeferred`): easing below 60 % the filter is still on, on its way to
+        // none — Red Shift's own, not a hand-set tint, which `release` switched back on at the part-way intensity.
+        let sh = loadShade()
+        st.customTintHeld = maGetEnabled(colorCategory) && maGetType(colorCategory) == 16 && warmthCurve(sh.warmth ?? 0).tint <= 0.001
+            && sh.tintDeferred != true
     }
     suppressTint(); st.lastSeen?.filterEnabled = maGetEnabled(colorCategory)
     saveState(st); log("true colour for \(st.heldFor!)")
