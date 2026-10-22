@@ -823,18 +823,18 @@ func roomKeyboard(for s: Settings) -> Double? {
 }
 /// Likewise for the keys: what you set at night in a kind of room is that room's keyboard level from then on.
 func rememberRoomKey(_ x: Double) {
-    guard roomActive, roomNightness >= 0.999, let kind = roomKindNow, var c = loadConfig() else { return }
-    var r = c.roomLight ?? RoomLight(); r.keyboard[kind: kind] = max(0, min(1, x))
-    c.roomLight = r; saveConfig(c); roomKeys = r.keyboard
+    guard roomActive, roomNightness >= 0.999, let kind = roomKindNow else { return }
+    // Taken for this run even when config.json can't be read (`set` runs on a placeholder then, so the pane's controls
+    // stay live): otherwise apply put the room's old level straight back over the slider.
+    roomKeys[kind: kind] = max(0, min(1, x))
+    if var c = loadConfig() { var r = c.roomLight ?? RoomLight(); r.keyboard[kind: kind] = roomKeys[kind: kind]; c.roomLight = r; saveConfig(c); roomKeys = r.keyboard }
     log(String(format: "%@ room: keyboard %.6f from now on", kind, x))
 }
 /// What you set at night in a kind of room is that room's level from then on.
 func rememberRoomLevel(_ x: Double) {
     guard let kind = roomKindNow, roomNightness > 0 else { return }
-    guard var c = loadConfig() else { return }; var r = c.roomLight ?? RoomLight()
-    r.levels[kind: kind] = max(0, min(1, x / roomNightness))
-    c.roomLight = r; saveConfig(c)
-    roomLevels = r.levels; roomLevel = r.levels[kind: kind]
+    roomLevels[kind: kind] = max(0, min(1, x / roomNightness)); roomLevel = roomLevels[kind: kind]   // as for the keys
+    if var c = loadConfig() { var r = c.roomLight ?? RoomLight(); r.levels[kind: kind] = roomLevel; c.roomLight = r; saveConfig(c); roomLevels = r.levels }
     log(String(format: "%@ room: red shift %.0f%% from now on", kind, roomLevel * 100))
 }
 /// Sets the room: `kind` from the app (its reading averaged, past the margins, held for seconds), or classified here
