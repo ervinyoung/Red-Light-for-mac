@@ -125,8 +125,8 @@ only a lamp turning on or off changes the level, not what's on screen.
 
 The keyboard backlight follows the room, too: the darker the room, the dimmer the keys, since eyes adapted to
 the dark need the least light. By default, a dark room gets Extra Dim 1, a dim room Extra Dim 4, and a lit room
-macOS's minimum (1%). The keys change over 2 seconds, so a lamp turning off dims them as gently as it deepens
-the red. While auto-brightness is on, and during the sunset and sunrise fades, the keys are left alone.
+macOS's minimum (1%). The keys fade instead of jumping: over 2 seconds in macOS's range, and in about a
+second between Extra Dim levels. While auto-brightness is on, and during the sunset and sunrise fades, the keys are left alone.
 
 When you move the Red Shift or Keyboard Backlight slider at night, or apply a preset, Red Light remembers that
 level for the kind of room you're in. For example, if you set 70% in a dark room, every dark room after that gets 70%. To see

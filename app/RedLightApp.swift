@@ -939,7 +939,7 @@ final class KeyboardHold {
             switch w {
             case .off: send(0, 250)
             // Immediately, whatever macOS thought of the keys: quickly under your finger, over 2 s when the room or a
-            // fade moves them, so a lamp going off dims the keys as gently as it deepens the red.
+            // fade moves them (the engine has asked macOS for the same 2 s fade; this only matters if it hadn't).
             case .level(let v): if wake { lit = true; send(Float(v), idleTime() < 1 ? 250 : 2000) }
             case .hold: if wake { lit = true }
             case .none: break

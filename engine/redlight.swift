@@ -246,6 +246,11 @@ func kbGetFloat(_ sel: String, _ id: UInt64) -> Float { let (imp, s) = kbImp(sel
 func kbGetDouble(_ sel: String, _ id: UInt64) -> Double { let (imp, s) = kbImp(sel); return unsafeBitCast(imp, to: (@convention(c) (AnyObject, Selector, UInt64) -> Double).self)(kbClient, s, id) }
 func kbGetBool(_ sel: String, _ id: UInt64) -> Bool { let (imp, s) = kbImp(sel); return unsafeBitCast(imp, to: (@convention(c) (AnyObject, Selector, UInt64) -> Bool).self)(kbClient, s, id) }
 @discardableResult func kbSetBrightness(_ v: Float, _ id: UInt64) -> Bool { let (imp, s) = kbImp("setBrightness:forKeyboard:"); return unsafeBitCast(imp, to: (@convention(c) (AnyObject, Selector, Float, UInt64) -> Bool).self)(kbClient, s, v, id) }
+/// The same, faded by macOS over `ms` milliseconds (`setBrightness:fadeSpeed:commit:forKeyboard:`).
+@discardableResult func kbFadeBrightness(_ v: Float, _ ms: Int32, _ id: UInt64) -> Bool {
+    let (imp, s) = kbImp("setBrightness:fadeSpeed:commit:forKeyboard:")
+    return unsafeBitCast(imp, to: (@convention(c) (AnyObject, Selector, Float, Int32, Bool, UInt64) -> Bool).self)(kbClient, s, v, ms, true, id)
+}
 @discardableResult func kbSetIdleDim(_ v: Double, _ id: UInt64) -> Bool { let (imp, s) = kbImp("setIdleDimTime:forKeyboard:"); return unsafeBitCast(imp, to: (@convention(c) (AnyObject, Selector, Double, UInt64) -> Bool).self)(kbClient, s, v, id) }
 @discardableResult func kbSetAuto(_ v: Bool, _ id: UInt64) -> Bool { let (imp, s) = kbImp("enableAutoBrightness:forKeyboard:"); return unsafeBitCast(imp, to: (@convention(c) (AnyObject, Selector, Bool, UInt64) -> Bool).self)(kbClient, s, v, id) }
 
@@ -323,7 +328,11 @@ func apply(_ s: Settings, label: String, quiet: Bool = false, ease: Double = 0) 
         if let a = s.keyboardAutoBrightness { kbSetAuto(a, id) }
         // Extra-dim levels are the app's to hold. Keys the app has turned off for inactivity stay off: it lights them at the
         // next touch, at the level recorded here (a fade step each minute lit them for a moment).
-        if let b = s.keyboardBrightness { if !isExtraDim(b) && !(b > 0 && appIdleKeys()) { kbSetBrightness(Float(b), id) }; saveCommanded(Commanded(keyboardBrightness: b)) }
+        // A gradual change (the room, a fade step) fades the keys over 2 s, as gently as the red; anything else at once.
+        if let b = s.keyboardBrightness {
+            if !isExtraDim(b) && !(b > 0 && appIdleKeys()) { if ease > 0 { kbFadeBrightness(Float(b), 2000, id) } else { kbSetBrightness(Float(b), id) } }
+            saveCommanded(Commanded(keyboardBrightness: b))
+        }
     }
     if !quiet { log("applied \(label): \(describe(s))" + (s.warmth.map { abs(lifted($0) - $0) > 0.005 ? String(format: " (dark room: shown at %.2f)", lifted($0)) : "" } ?? "")) }
 }
