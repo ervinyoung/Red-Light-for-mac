@@ -102,7 +102,9 @@ enum Tint {
     private static func sym<T>(_ n: String, _ t: T.Type) -> T? { ma.flatMap { dlsym($0, n) }.map { unsafeBitCast($0, to: t) } }
     private static let setEnabled = sym("MADisplayFilterPrefSetCategoryEnabled", (@convention(c) (Int, Bool) -> Void).self)
     private static let setIntensity = sym("MADisplayFilterPrefSetSingleColorIntensity", (@convention(c) (Double) -> Void).self)
-    static func set(_ t: Double) { setIntensity?(t); setEnabled?(1, t > 0.001) }
+    /// Never from a `--snapshot` run (like Gamma): one taken while the engine writes an eased step started an ease of its
+    /// own, whose frames wrote the real display's tint against the running app's.
+    static func set(_ t: Double) { guard !isSnapshotRun else { return }; setIntensity?(t); setEnabled?(1, t > 0.001) }
 }
 
 /// Same curve as the engine, kept here only so a slider drag can paint the gamma legs without waiting on a process.
