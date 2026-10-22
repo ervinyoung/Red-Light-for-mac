@@ -2069,7 +2069,8 @@ struct SettingsPage: View {
     }
     var roomKeysText: String {
         let k = (m.config.roomLight ?? RoomLight()).keyboard
-        return "And your keyboard backlight: dark \(fmtKeyboard(k.dark)), dim \(fmtKeyboard(k.dim)), lit \(fmtKeyboard(k.lit))"
+        func f(_ v: Double) -> String { let s = fmtKeyboard(v); return s == "Off" ? "off" : s }     // mid-sentence, as above
+        return "And your keyboard backlight: dark \(f(k.dark)), dim \(f(k.dim)), lit \(f(k.lit))"
     }
     var locationLabel: String {
         let c = String(format: "%.2f, %.2f", m.config.latitude, m.config.longitude)
