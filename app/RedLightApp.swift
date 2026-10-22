@@ -1260,9 +1260,11 @@ final class Model: ObservableObject {
         if t >= 1 { stopEase() }
     }
     private func stopEase(finish: Bool = true) {
-        // An ease cut short leaves the tint leg where the engine meant it to end, not part-way — unless it was cut short
-        // by off or true colour, whose tint is the engine's (none).
-        if finish && easeTimer != nil && easeTint && shade.tintDeferred == true { Tint.set(warmthCurve(easeTo).tint) }
+        // An ease cut short leaves the tint leg where the look now drawn wants it, not part-way — unless it was cut short
+        // by off or true colour, whose tint is the engine's (none). For a direct change too (a preset, a pause, the
+        // slider): a frame drawn after the engine set its tint and before this refresh put the ease's own back over it,
+        // left all night; and the old ease's end, written under a slider drag, flashed until the engine's `set` landed.
+        if finish && easeTimer != nil && easeTint { Tint.set(warmthCurve(shade.warmth ?? 0).tint) }
         easeTimer?.invalidate(); easeTimer = nil; tintDrawn = nil
     }
     var isNight: Bool { state?.mode == "night" }
