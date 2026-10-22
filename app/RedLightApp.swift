@@ -1240,6 +1240,10 @@ final class Model: ObservableObject {
                     easeTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.easeStep() }
                     return
                 }
+                // Drawn at once instead (just launched, so nothing drawn to ease from; or read after its end): the tint
+                // leg the engine left to us goes with the gamma legs. Left alone it stayed at the old warmth's until the
+                // engine's settleTint or the next eased step: a minute or more of tint and gamma out of step.
+                if shade.tintDeferred == true { Tint.set(warmthCurve(target).tint) }
             }
         }
         stopEase()
