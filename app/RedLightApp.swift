@@ -1314,6 +1314,15 @@ final class Model: ObservableObject {
     private var configsInFlight = 0
     func saveConfig(reapply: Bool = true) {
         func obj(_ d: Data?) -> [String: Any]? { d.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } }
+        // Key by key inside objects too: the engine writes inside one (`set` and presets remember `roomLight.levels` and
+        // `roomLight.keyboard`), and Match Room Light writing all of `roomLight` from this model's copy put back the
+        // levels from before a `set` still queued ahead of it (a brightness key pressed with Settings open).
+        func merge(_ disk: inout [String: Any], _ was: [String: Any], _ mine: [String: Any]) {
+            for k in Set(was.keys).union(mine.keys) where !NSArray(array: [was[k] ?? NSNull()]).isEqual(to: [mine[k] ?? NSNull()]) {
+                if let w = was[k] as? [String: Any], let m = mine[k] as? [String: Any], var d = disk[k] as? [String: Any] { merge(&d, w, m); disk[k] = d }
+                else { disk[k] = mine[k] }
+            }
+        }
         if let base = diskConfig, let was = obj(try? enc.encode(base)), let mine = obj(try? enc.encode(config)) {
             // Under the engine's lock, off the main thread: an engine run that loaded config.json before this
             // (`location`, `preset save`) would save its whole copy over the change, or this over its. Until it is
@@ -1324,7 +1333,7 @@ final class Model: ObservableObject {
             liveQueue.async { [weak self] in
                 withEngineLock {
                     guard var disk = obj(try? Data(contentsOf: configURL)) else { NSLog("Red Light: config.json unreadable; not saving over it"); return }
-                    for k in Set(was.keys).union(mine.keys) where !NSArray(array: [was[k] ?? NSNull()]).isEqual(to: [mine[k] ?? NSNull()]) { disk[k] = mine[k] }
+                    merge(&disk, was, mine)
                     if let d = try? JSONSerialization.data(withJSONObject: disk), let merged = try? dec.decode(Config.self, from: d) {
                         try? enc.encode(merged).write(to: configURL, options: .atomic)
                     }
