@@ -74,8 +74,9 @@ struct Learning: Codable {
     init() {}
     /// Lenient, as in the app: a hand-edited partial block ({"enabled": false}) failed the whole config and stopped
     /// the schedule while the pane looked fine. Missing or malformed fields take their defaults.
+    /// Not an object at all (`"learning": false`) is all defaults too, as the app reads it.
     init(from d: Decoder) throws {
-        let c = try d.container(keyedBy: CodingKeys.self)
+        guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }
         enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? true
         minNights = (try? c.decode(Int.self, forKey: .minNights)) ?? 3
         lookbackDays = (try? c.decode(Int.self, forKey: .lookbackDays)) ?? 14
@@ -92,7 +93,7 @@ struct RoomLight: Codable {
     var keyboard = RoomKeys()
     init() {}
     init(from d: Decoder) throws {
-        let c = try d.container(keyedBy: CodingKeys.self)
+        guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }      // `"roomLight": false`: as in Learning
         enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? true
         levels = (try? c.decode(RoomLevels.self, forKey: .levels)) ?? RoomLevels()
         keyboard = (try? c.decode(RoomKeys.self, forKey: .keyboard)) ?? RoomKeys()
