@@ -642,7 +642,9 @@ func startTransition(to mode: String, cfg: Config, learned: Learned, state: Stat
     }
     st.mode = mode
     st.ramp = nil
-    clearNight(&st)                                  // a new day or night: nothing held over, tonight's nudge is spent
+    // A new night: nothing held over, last night's nudge is spent. Not at sunrise: what you chose rides the fade out (Off
+    // at 5 AM came back as full red at the fade's first minute). By day it counts for nothing, and sunset clears it.
+    if mode == "night" { clearNight(&st) }
     roomNightness = nightness(st, now: now)
     // If we woke up mid-transition, pick the fade up where the clock says it should be.
     let began = since ?? now
