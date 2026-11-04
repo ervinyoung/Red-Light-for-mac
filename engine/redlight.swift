@@ -812,20 +812,22 @@ func along(_ pts: [(Double, Double)], _ u: Double) -> Double {
     return pts.last!.1
 }
 /// The curve for someone who has told Red Light nothing yet: 7 PM, 9 PM, 11 PM, 1 AM, 3 AM in a dark room, half that in
-/// a dim one, nothing with the lights on.
+/// a dim one, nothing with the lights on. From 10 AM it comes back down to meet itself at noon, where the night clock
+/// starts again: only a night that runs on past noon sees that (Turn On Now, a polar winter), and it fell 80 points there.
 func redPrior(_ u: Double, _ kind: String) -> Double {
-    let dark = along([(420, 0.20), (540, 0.30), (660, 0.55), (780, 0.80), (900, 1)], u)
+    let dark = along([(420, 0.20), (540, 0.30), (660, 0.55), (780, 0.80), (900, 1), (1320, 1), (1440, 0.20)], u)
     return kind == "dark" ? dark : kind == "dim" ? dark / 2 : 0
 }
 /// The keys, in the log of their PWM steps: dimmer as the night goes on, Extra Dim 1 the least a dark room gets.
 func keysPrior(_ u: Double, _ kind: String) -> Double {
     switch kind {
-    case "dark": return along([(600, log(4)), (720, log(2))], u)
-    case "dim":  return along([(600, log(21)), (720, log(9))], u)
+    case "dark": return along([(600, log(4)), (720, log(2)), (1320, log(2)), (1440, log(4))], u)
+    case "dim":  return along([(600, log(21)), (720, log(9)), (1320, log(9)), (1440, log(21))], u)
     default:     return log(54)
     }
 }
-func nearInTime(_ a: Double, _ b: Double) -> Double { exp(-pow((a - b) / 90, 2) / 2) }
+/// Around the clock: a lesson just before noon is near one just after it.
+func nearInTime(_ a: Double, _ b: Double) -> Double { let d = abs(a - b); return exp(-pow(min(d, 1440 - d) / 90, 2) / 2) }
 /// The curve at `d`: the prior, bent by the choices near that time of night. Two "choices' worth" of weight stay with
 /// the prior, so one nudge moves the curve about a third of the way and repeated ones take it the rest. Each newer choice
 /// counts a little over the one before it.
