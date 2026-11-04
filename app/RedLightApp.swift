@@ -1257,6 +1257,7 @@ final class Model: ObservableObject {
             // Steps queued after this status (the queue is serial) make it stale; the final step refreshes again.
             DispatchQueue.main.async { guard let self = self else { return }; self.sunLine = sun; if self.setsInFlight == 0 && !self.keysUnderFinger { self.parseLive(status) } }
         }
+        if !snapshotMode, forecast == nil || forecastShown { loadForecast() }
     }
     /// Off and true colour both mean the display is drawn exactly as macOS would draw it, whatever shade.json says.
     /// Off is what the switch shows as well as what the engine has recorded: while an `off` is on its way, a refresh
@@ -1326,9 +1327,15 @@ final class Model: ObservableObject {
     var keysAreAuto: Bool { nightIsAuto && state?.holdKeys == nil && live.keyboardAutoBrightness != true }
     func backToAuto() { runCLI(["auto"]) }
     @Published var forecast: Forecast?
+    /// Settings is on screen: every refresh brings the chart up to date, as forgetting, a new location or Adapt to My
+    /// Adjustments change the curve under it, and the page can stay open for hours with its dot left behind. (Read once
+    /// before that, too, so the page doesn't open and then grow.)
+    var forecastShown = false
     func loadForecast() {
+        guard !snapshotDemo else { return }                  // a fixed look, not this Mac's curve
         liveQueue.async { [weak self] in
-            let f = try? JSONDecoder().decode(Forecast.self, from: Data(cli("forecast").utf8))
+            // One that can't be read leaves the last good night up, rather than the page shrinking under you.
+            guard let f = try? JSONDecoder().decode(Forecast.self, from: Data(cli("forecast").utf8)) else { return }
             DispatchQueue.main.async { self?.forecast = f }
         }
     }
@@ -2126,7 +2133,8 @@ struct SettingsPage: View {
             Line()
 
             Header(text: "Your Night")
-            if let f = m.forecast { NightChart(f: f).padding(.vertical, 6) }
+            // Only while it is what happens: with Match Room Light off the night is your own level, not this curve.
+            if let f = m.forecast, m.config.roomLight?.enabled ?? true { NightChart(f: f).padding(.vertical, 6) }
             ToggleRow(label: "Match Room Light", isOn: Binding(get: { m.config.roomLight?.enabled ?? true }, set: {
                 var r = m.config.roomLight ?? RoomLight(); r.enabled = $0; m.config.roomLight = r
                 m.saveConfig(reapply: false); m.runCLI(["room"])           // queued behind the save: on eases to the room, off draws your level
@@ -2166,8 +2174,8 @@ struct SettingsPage: View {
             SettingsRow(text: "Quit Red Light").onTapGesture { NSApp.terminate(nil) }
         }
         .padding(.horizontal, CC.side)
-        .onAppear { lat = String(m.config.latitude); lon = String(m.config.longitude); m.loadForecast() }
-        .onDisappear { m.stopRecording() }
+        .onAppear { lat = String(m.config.latitude); lon = String(m.config.longitude); m.forecastShown = true; m.loadForecast() }
+        .onDisappear { m.stopRecording(); m.forecastShown = false }
     }
     var locationLabel: String {
         let c = String(format: "%.2f, %.2f", m.config.latitude, m.config.longitude)
