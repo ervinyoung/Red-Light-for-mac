@@ -686,8 +686,13 @@ func stepRamp(_ st: inout State, now: Date) {
     // Each minute's step is drawn across the minute, so the fade is continuous rather than a step a minute.
     if t >= 1 {
         // Keys you set during the sunset fade stay where you put them: night arriving put the room's level over them at
-        // once. (They are already there, eased each minute; the room takes them over at its next change.)
-        var to = r.to; if r.keysPinned == true { to.keyboardBrightness = nil }
+        // once. (They are already there, eased each minute.) So they hold, as if set at night, until the room changes:
+        // only left unheld, the next minute's check moved them onto the curve.
+        var to = r.to
+        if r.keysPinned == true {
+            if st.mode == "night", let b = to.keyboardBrightness { st.holdKeys = b; roomHoldKeys = b }
+            to.keyboardBrightness = nil
+        }
         apply(to, label: "\(r.label) 100%", ease: 60); st.ramp = nil
     }
     else { apply(blend(r.from, r.to, t), label: "\(r.label) \(Int(t * 100))%", quiet: true, ease: 60) }
@@ -969,7 +974,7 @@ func senseRoom(_ st: inout State, now: Date, kind given: String? = nil, lux luxG
     let enabled = roomEnabled
     let lux = enabled ? (luxGiven ?? (given == nil ? roomLux() : nil)) : nil
     let kind = enabled ? (given ?? lux.map { roomKind(lux: $0, was: st.room?.kind) }) : nil, was = st.room?.kind
-    if kind != was { st.holdRed = nil; st.holdKeys = nil; roomHoldRed = nil; roomHoldKeys = nil }
+    if kind != was { st.holdRed = nil; st.holdKeys = nil; roomHoldRed = nil; roomHoldKeys = nil; st.ramp?.keysPinned = nil }
     if let kind = kind {
         roomKindNow = kind; roomActive = true; roomLevel = roomRed(now)
         if kind != was { log(String(format: "%@ room%@: red shift %.0f%%", kind, lux.map { String(format: " (%.0f lux)", $0) } ?? "", roomLevel * 100)) }
@@ -1099,7 +1104,7 @@ case "auto":
     var st = loadState() ?? blank()
     if st.disabled == true || (st.pausedUntil.map { now < $0 } ?? false) { exit(0) }
     holdTint = st.heldFor != nil
-    clearNight(&st)
+    clearNight(&st); st.ramp?.keysPinned = nil      // keys set during a fade would hold when it ends
     var sh = loadShade()                            // a look held at off leaves no warmth for the room's level to show through
     if (sh.base ?? 0) <= 0.001, st.mode == "night" { sh.base = nightPreset(cfg: cfg, learned: learned).warmth; saveShade(sh) }
     if roomOutOfDate() { reliftWarmth(&st) }
