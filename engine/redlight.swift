@@ -783,17 +783,24 @@ struct Choice: Codable { var t: Date; var field: String; var room: String; var v
 struct Nudge: Codable { var delta: Double; var at: Date; var room: String }
 let choicesURL = appDir.appendingPathComponent("choices.jsonl")
 let lineEnc: JSONEncoder = { let e = JSONEncoder(); e.outputFormatting = [.sortedKeys]; e.dateEncodingStrategy = .iso8601; return e }()
-func loadChoices() -> [Choice] {
-    ((try? String(contentsOf: choicesURL, encoding: .utf8)) ?? "").split(separator: "\n").compactMap { try? dec.decode(Choice.self, from: Data($0.utf8)) }
+/// Line by line, from the bytes: a bad line costs only itself. Read as text, one stray byte failed the whole file and a
+/// hand-edit's CRLF (a single Character, so nothing split) made it one long line: no lessons, and the next save wrote
+/// over them all.
+func choiceLines() -> [(raw: Data, choice: Choice?)] {
+    ((try? Data(contentsOf: choicesURL)) ?? Data()).split(separator: 0x0A).map { (Data($0), try? dec.decode(Choice.self, from: Data($0))) }
 }
-/// A drag is one choice: the last of a burst replaces the rest. The newest 400 are kept.
+func loadChoices() -> [Choice] { choiceLines().compactMap { $0.choice } }
+/// A drag is one choice: the last of a burst replaces the rest. The newest 400 are kept. What can't be read stays in the
+/// file as it was: it may be one typo from a lesson, and it's yours.
 func saveChoice(_ c: Choice) {
-    var all = loadChoices()
-    if let l = all.last, l.field == c.field, l.room == c.room, c.t.timeIntervalSince(l.t) < 45 { all.removeLast() }
-    all.append(c); all = Array(all.suffix(400))
-    let text = all.compactMap { (try? lineEnc.encode($0)).flatMap { String(data: $0, encoding: .utf8) } }.joined(separator: "\n") + "\n"
-    try? text.write(to: choicesURL, atomically: true, encoding: .utf8)
-    roomChoices = all
+    var lines = choiceLines()
+    if let i = lines.lastIndex(where: { $0.choice != nil }), let l = lines[i].choice, l.field == c.field, l.room == c.room, c.t.timeIntervalSince(l.t) < 45 { lines.remove(at: i) }
+    guard let new = try? lineEnc.encode(c) else { return }
+    lines.append((new, c))
+    var extra = lines.filter { $0.choice != nil }.count - 400
+    lines.removeAll { if $0.choice != nil && extra > 0 { extra -= 1; return true }; return false }
+    try? Data(lines.flatMap { $0.raw + [0x0A] }).write(to: choicesURL, options: .atomic)
+    roomChoices = lines.compactMap { $0.choice }
 }
 /// Minutes since noon, so a night is one unbroken line across midnight. By the clock, not the sun: bedtime doesn't move
 /// when the sunset does.
