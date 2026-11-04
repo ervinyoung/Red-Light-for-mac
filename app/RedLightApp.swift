@@ -1820,7 +1820,7 @@ struct NightChart: View {
         return p
     }
     private var ticks: [(Double, String)] {
-        let fmt = DateFormatter(); fmt.dateFormat = "h a"
+        let fmt = DateFormatter(); fmt.setLocalizedDateFormatFromTemplate("j")      // "9 PM", "21 Uhr", "21": as this Mac tells the time
         var d = Calendar.current.dateInterval(of: .hour, for: Date(timeIntervalSince1970: f.from))!.end, out: [(Double, String)] = []
         while d.timeIntervalSince1970 < f.to {
             if Calendar.current.component(.hour, from: d) % 3 == 0 { out.append((d.timeIntervalSince1970, fmt.string(from: d))) }
