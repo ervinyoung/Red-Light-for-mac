@@ -840,6 +840,8 @@ final class RoomSensor {
         return (hidCopyServices(c)?.takeRetainedValue() as? [AnyObject])?.first
     }()
     private var client: AnyObject?
+    /// Whether this Mac has one at all, lid open or closed.
+    var present: Bool { service != nil }
     func lux() -> Double? {
         let root = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
         let closed = IORegistryEntryCreateCFProperty(root, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Bool
@@ -1302,6 +1304,9 @@ final class Model: ObservableObject {
     var redIsAuto: Bool { nightIsAuto && state?.holdRed == nil }
     var keysAreAuto: Bool { nightIsAuto && state?.holdKeys == nil && live.keyboardAutoBrightness != true }
     func backToAuto() { runCLI(["auto"]) }
+    /// The curve is what the night will do only with a room to go by. Without a sensor (a Mac mini) or with Match Room
+    /// Light off, the night is the schedule's own steady level, as it always was, and a chart of a deepening curve isn't true.
+    var nightFollowsCurve: Bool { roomSensor.present && (config.roomLight?.enabled ?? true) }
     @Published var forecast: Forecast?
     func loadForecast() {
         liveQueue.async { [weak self] in
@@ -2102,7 +2107,7 @@ struct SettingsPage: View {
             Line()
 
             Header(text: "Your Night")
-            if let f = m.forecast { NightChart(f: f).padding(.vertical, 6) }
+            if let f = m.forecast, m.nightFollowsCurve { NightChart(f: f).padding(.vertical, 6) }
             ToggleRow(label: "Match Room Light", isOn: Binding(get: { m.config.roomLight?.enabled ?? true }, set: {
                 var r = m.config.roomLight ?? RoomLight(); r.enabled = $0; m.config.roomLight = r
                 m.saveConfig(reapply: false); m.runCLI(["room"])           // queued behind the save: on eases to the room, off draws your level
