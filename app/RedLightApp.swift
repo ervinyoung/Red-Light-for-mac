@@ -1100,10 +1100,11 @@ final class Model: ObservableObject {
             guard let self = self else { return }
             self.updater.tick(screenIsPlain: self.isOff || !self.isTinting) }
     }
-    /// Night, Red Shift 80 %, keys at 0.3 % with a 5 s timeout — the "Night" preset, as shipped.
+    /// Night in a dark room, on Auto as most nights are: Red Shift 80 %, keys at 0.3 % with a 5 s timeout.
     func demoLook() {
         if let d = try? Data(contentsOf: configURL), let c = try? dec.decode(Config.self, from: d) { config = c }
-        state = ModeState(mode: "night", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil, disabled: false, heldFor: nil)
+        state = ModeState(mode: "night", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil, disabled: false, heldFor: nil,
+                          room: Room(lux: 2, target: 0.8, darkness: 0.8, at: Date(), kind: "dark"))
         let c = warmthCurve(0.8)
         shade = Shade(enabled: false, level: 0.2, warmth: 0.8, gammaBlue: c.blue, gammaGreen: c.green)
         live = Settings(keyboardBrightness: ProcessInfo.processInfo.environment["REDLIGHT_DEMO_KB"].flatMap(Double.init) ?? 0.003, keyboardIdleDimSeconds: 5, shadeEnabled: false, shadeLevel: 0.2, warmth: 0.8)
@@ -1322,9 +1323,12 @@ final class Model: ObservableObject {
     /// The kind of room the look is set for now, while Match Room Light has one.
     var roomKindNow: String? { (config.roomLight?.enabled ?? true) ? state?.room?.kind : nil }
     /// Whether the room and the hour are choosing, rather than a look held for now.
-    var nightIsAuto: Bool { isNight && roomKindNow != nil && !isOff && !isPaused && heldFor == nil }
+    var nightIsAuto: Bool { isNight && roomKindNow != nil && !isOff && !isPaused && heldFor == nil && !snapshotDaylight }
     var redIsAuto: Bool { nightIsAuto && state?.holdRed == nil }
     var keysAreAuto: Bool { nightIsAuto && state?.holdKeys == nil && live.keyboardAutoBrightness != true }
+    /// Nothing held for now. Not `redIsAuto && keysAreAuto`: with macOS's own auto-brightness on, nothing is held and the
+    /// night has the red, but the Auto row stayed dark however often it was pressed.
+    var nothingHeld: Bool { nightIsAuto && state?.holdRed == nil && state?.holdKeys == nil }
     func backToAuto() { runCLI(["auto"]) }
     @Published var forecast: Forecast?
     /// Settings is on screen: every refresh brings the chart up to date, as forgetting, a new location or Adapt to My
@@ -1970,6 +1974,7 @@ struct Panel: View {
         .padding(.horizontal, CC.side)
         .animation(.easeInOut(duration: 0.18), value: waiting)
         .animation(.easeInOut(duration: 0.18), value: m.enabled)
+        .animation(.easeInOut(duration: 0.18), value: m.nightIsAuto)       // the Auto row comes and goes like the rows above
     }
 
     @ViewBuilder var controls: some View {
@@ -1993,7 +1998,7 @@ struct Panel: View {
 
             Header(text: "Presets")
             let list = m.config.presets ?? []
-            if m.nightIsAuto { IconRow(icon: "moon.stars.fill", label: "Auto", active: m.redIsAuto && m.keysAreAuto).onTapGesture { m.backToAuto() } }
+            if m.nightIsAuto { IconRow(icon: "moon.stars.fill", label: "Auto", active: m.nothingHeld).onTapGesture { m.backToAuto() } }
             if list.isEmpty { TextRow(text: "No presets yet", secondary: true) }
             ForEach(list) { p in
                 IconRow(icon: p.icon, label: p.name, trailing: m.nightPresetName == p.name ? "At sunset" : nil, active: isCurrent(p))
@@ -2040,7 +2045,8 @@ struct Panel: View {
     /// applied (only warmth defaults, to 0), so a missing one matches whatever is there rather than counting as off.
     func isCurrent(_ p: Preset) -> Bool {
         let s = p.settings
-        if m.nightIsAuto && m.state?.holdRed == nil { return false }        // the night is choosing, whatever it happens to match
+        // The night is choosing, whatever it happens to match; under true colour too, when nightIsAuto says no but nothing is held.
+        if m.isNight && m.roomKindNow != nil && m.state?.holdRed == nil { return false }
         let kbOK = s.keyboardBrightness.map { abs(kbTicks($0) - kbTicks(m.live.keyboardBrightness)) < 1 } ?? true
         let shadeOK = (s.shadeEnabled ?? m.shade.enabled) == m.shade.enabled
             && (!m.shade.enabled || s.shadeLevel.map { abs($0 - m.shade.level) < 0.02 } ?? true)
