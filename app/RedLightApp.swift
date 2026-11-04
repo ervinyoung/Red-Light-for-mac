@@ -1182,7 +1182,9 @@ final class Model: ObservableObject {
         if roomFresh || was == nil {
             guard luxSamples >= 4 else { return }
             roomFresh = false
-            let k = Self.roomKind(lux: slow, was: nil)
+            // By the room's own margins, as ever: another room is well past them, and a dark room reading 6 lux off the
+            // screen, judged as if new, woke as dim, its red halved in 3 s and a look held for now let go.
+            let k = Self.roomKind(lux: slow, was: was)
             if k != was { sendRoom([k, String(format: "%.1f", slow), "now"]) }
             return
         }
