@@ -786,11 +786,14 @@ let lineEnc: JSONEncoder = { let e = JSONEncoder(); e.outputFormatting = [.sorte
 func loadChoices() -> [Choice] {
     ((try? String(contentsOf: choicesURL, encoding: .utf8)) ?? "").split(separator: "\n").compactMap { try? dec.decode(Choice.self, from: Data($0.utf8)) }
 }
-/// A drag is one choice: the last of a burst replaces the rest. The newest 400 are kept.
+/// A drag is one choice: the last of a burst replaces the rest, with the other slider touched in between or not. A value
+/// of 0 is Off, no lesson: it only takes back the burst it ended, or the 15 % a drag passes on its way there would stay
+/// behind as one. The newest 400 are kept.
 func saveChoice(_ c: Choice) {
     var all = loadChoices()
-    if let l = all.last, l.field == c.field, l.room == c.room, c.t.timeIntervalSince(l.t) < 45 { all.removeLast() }
-    all.append(c); all = Array(all.suffix(400))
+    if let i = all.lastIndex(where: { $0.field == c.field }), all[i].room == c.room, c.t.timeIntervalSince(all[i].t) < 45 { all.remove(at: i) }
+    if c.value > 0 { all.append(c) }
+    all = Array(all.suffix(400))
     let text = all.compactMap { (try? lineEnc.encode($0)).flatMap { String(data: $0, encoding: .utf8) } }.joined(separator: "\n") + "\n"
     try? text.write(to: choicesURL, atomically: true, encoding: .utf8)
     roomChoices = all
@@ -886,8 +889,10 @@ func roomRed(_ now: Date) -> Double {
 func chooseRed(_ st: inout State, _ shown: Double, now: Date) {
     guard let kind = roomKindNow, roomNightness > 0 else { return }
     let x = max(0, min(1, shown / roomNightness))
-    if x <= 0.01 { st.holdRed = 0; st.nudgeRed = nil }
-    else {
+    if x <= 0.01 {
+        if roomAdapts { saveChoice(Choice(t: now, field: "red", room: kind, value: 0)) }
+        st.holdRed = 0; st.nudgeRed = nil
+    } else {
         if roomAdapts { saveChoice(Choice(t: now, field: "red", room: kind, value: x)) }
         st.holdRed = nil; st.nudgeRed = Nudge(delta: x - predictRed(kind, at: now), at: now, room: kind)
     }
@@ -897,7 +902,7 @@ func chooseRed(_ st: inout State, _ shown: Double, now: Date) {
 /// The keys hold what you set until the room changes; the curve learns from it, except from off.
 func chooseKeys(_ st: inout State, _ b: Double, now: Date) {
     guard roomActive, roomNightness >= 0.999, let kind = roomKindNow else { return }
-    if roomAdapts && b > 0 { saveChoice(Choice(t: now, field: "keys", room: kind, value: kbTicksOf(b))) }
+    if roomAdapts { saveChoice(Choice(t: now, field: "keys", room: kind, value: kbTicksOf(b))) }
     st.holdKeys = b; roomHoldKeys = b
     log(String(format: "%@ room: you chose keyboard %.6f", kind, b))
 }
