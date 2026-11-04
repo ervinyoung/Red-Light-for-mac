@@ -861,7 +861,7 @@ func kbFromTicks(_ t: Double) -> Double { t <= 0 ? 0 : t < 54 ? t / 54 * kbFloor
 /// without this feature — never off because the lid is closed.
 var roomLevel = 0.0, roomActive = false, roomNightness = 0.0, roomKindNow: String? = nil
 var roomEnabled = true, roomAdapts = true, roomChoices: [Choice] = []
-var roomNudge: Nudge? = nil, roomHoldRed: Double? = nil, roomHoldKeys: Double? = nil
+var roomNudge: Nudge? = nil, roomHoldRed: Double? = nil, roomHoldKeys: Double? = nil, roomSunsetFade = false
 func setRoomContext(cfg: Config, learned: Learned, state: State?, now: Date) {
     roomEnabled = (cfg.roomLight ?? RoomLight()).enabled
     roomAdapts = (cfg.learning ?? Learning()).enabled
@@ -871,6 +871,7 @@ func setRoomContext(cfg: Config, learned: Learned, state: State?, now: Date) {
     roomNudge = state?.nudgeRed; roomHoldRed = state?.holdRed; roomHoldKeys = state?.holdKeys
     roomLevel = roomRed(now)
     roomNightness = nightness(state, now: now)
+    roomSunsetFade = state?.mode == "night" && state?.ramp != nil
 }
 /// The red for this room now: a look held for now, or the curve plus tonight's nudge. A nudge lands exactly where you
 /// put it and fades onto the curve with a half-life of two hours, half as strong in the neighbouring room. A lit room has
@@ -885,15 +886,17 @@ func roomRed(_ now: Date) -> Double {
     }
     return max(0, min(1, p))
 }
-/// You set the red at night: a lesson for the curve, and tonight's nudge. Off isn't a lesson, just off for now.
+/// You set the red at night: a lesson for the curve, and tonight's nudge. Off isn't a lesson, just off for now. The lesson
+/// is what you asked to see at this hour, never that read through a fade's progress: 15 % set three minutes into sunset
+/// taught 100 %, and climbed to 91 % by the end of the fade.
 func chooseRed(_ st: inout State, _ shown: Double, now: Date) {
     guard let kind = roomKindNow, roomNightness > 0 else { return }
-    let x = max(0, min(1, shown / roomNightness))
+    let x = max(0, min(1, shown / (roomSunsetFade ? 1 : roomNightness)))
     if x <= 0.01 {
         if roomAdapts { saveChoice(Choice(t: now, field: "red", room: kind, value: 0)) }
         st.holdRed = 0; st.nudgeRed = nil
     } else {
-        if roomAdapts { saveChoice(Choice(t: now, field: "red", room: kind, value: x)) }
+        if roomAdapts { saveChoice(Choice(t: now, field: "red", room: kind, value: max(0, min(1, shown)))) }
         st.holdRed = nil; st.nudgeRed = Nudge(delta: x - predictRed(kind, at: now), at: now, room: kind)
     }
     roomHoldRed = st.holdRed; roomNudge = st.nudgeRed; roomLevel = roomRed(now)
@@ -920,11 +923,13 @@ func nightness(_ st: State?, now: Date) -> Double {
     switch st.mode { case "night": return t ?? 1; case "day": return t.map { 1 - $0 } ?? 0; default: return 0 }
 }
 /// The warmth drawn for a scheduled one. At night, with a room to go by, it is the room's level now, faded in and out
-/// with the sunset and sunrise fades. Off (0: switched off, paused) stays off in any room.
+/// with the sunset and sunrise fades. Off (0: switched off, paused) stays off in any room. A red you chose during the
+/// sunset fade is the red you want from then on, so that fade stops scaling it (`clearNight` at sunset means anything
+/// here was chosen since). The sunrise fade always does: the red has to be gone by the end of it.
 func lifted(_ w: Double) -> Double {
     let w = max(0, min(1, w))
     guard roomActive, roomNightness > 0, w > 0.001 else { return w }
-    return roomLevel * roomNightness
+    return roomLevel * (roomSunsetFade && (roomHoldRed != nil || roomNudge != nil) ? 1 : roomNightness)
 }
 /// The keyboard level for this room now, once night has fully arrived (the sunset and sunrise fades ease the keys
 /// themselves) and the look is a night one: an off or paused look (no red) keeps its own keys, and so does
@@ -1230,7 +1235,7 @@ case "preset":
         // At night in a known kind of room, the preset's Red Shift becomes that room's level, like the slider.
         // A preset is for now: it holds until the room changes and teaches the curve nothing.
         if roomActive && roomNightness > 0, var st = loadState() {
-            st.holdRed = max(0, min(1, (s.warmth ?? 0) / roomNightness)); roomHoldRed = st.holdRed; roomLevel = roomRed(now)
+            st.holdRed = max(0, min(1, (s.warmth ?? 0) / (roomSunsetFade ? 1 : roomNightness))); roomHoldRed = st.holdRed; roomLevel = roomRed(now)
             if roomNightness >= 0.999, let b = s.keyboardBrightness { st.holdKeys = b; roomHoldKeys = b }
             saveState(st)
         }
