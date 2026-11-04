@@ -77,7 +77,7 @@ The following table lists the commands:
 | `redlight preset list` | List presets. Other subcommands are `apply "Night"`, `save "Reading" book.fill`, `night "Night"`, and `delete "Reading"`. |
 | `redlight shade on` | Control the screen shade. Other arguments are `off`, `toggle`, `up`, `down`, and a level from 0 to 90. |
 | `redlight location 37.43 -122.14` | Set the location manually. Add `auto` to let Location Services update it. |
-| `redlight learned`, `redlight forget` | Show or clear the defaults that Red Light adopted. |
+| `redlight learned`, `redlight forget` | Show the defaults that Red Light adopted, or clear them along with your night's lessons. |
 | `redlight hold Figma` | Show true color while a color-sensitive app is in front. |
 | `redlight release` | Restore the red after a hold. |
 | `redlight room` | Read the light sensor and set the look for the kind of room. The app runs `redlight room dark`, `dim`, or `lit` when the room's light settles. |
@@ -106,7 +106,7 @@ Red Shift uses each method where it works best:
 | 0–60% | Channel scaling only. Blue goes from 100% to 0%, and green goes down to 60%. Text is most legible in this range. |
 | 60–100% | Blue stays at 0%. Green goes down to 35%, and a brightness-preserving tint of up to 50% adds the removed green back as red brightness. |
 
-At 60%, the display shows no blue and no tint. By default, night is 45% Red Shift, the keyboard at Extra Dim 2, and keys off after 30 seconds of inactivity. In the configuration and the
+At 60%, the display shows no blue and no tint. Without a light sensor reading, night is 45% Red Shift and the keyboard at Extra Dim 2 by default. With one, see [Your night](#your-night). In the configuration and the
 command line, Red Shift is called `warmth`. The menu bar app draws the gamma table, and the engine sets the
 tint; `shade.json` stores both.
 
@@ -134,8 +134,9 @@ brightness keys, Red Light does two things:
   share half of what they learn.
 
 Lessons don't expire with time, only as newer ones replace them, so when you stop adjusting, the curve stays
-where you left it. The panel shows **Auto** next to a value that Red Light is choosing, and the **Your Night** chart
-in **Red Light Settings** shows the night ahead.
+where you left it. At night, the panel shows **Auto** next to a value that Red Light is choosing, and the
+**Your Night** chart in **Red Light Settings** shows the night ahead. This needs a Mac with an ambient light
+sensor, which MacBooks have. Without one, night is a steady level.
 
 **Presets are for now.** A preset holds its look until the room changes and teaches nothing. Turning Red Shift
 off works the same way. To go back at any time, click **Auto** in the panel.
@@ -156,7 +157,8 @@ The look follows the sunset and sunrise fades, so it never jumps at a transition
 drawn across the minute, too. By day, while paused, and with the lid closed, Red Shift is your own level.
 
 To turn this off, in **Red Light Settings**, turn off **Match Room Light**, or set `roomLight.enabled` to `false` in
-`config.json`. To stop it learning, turn off **Adapt to My Adjustments**. Lessons are in `choices.jsonl`, on your Mac only.
+`config.json`. To stop it learning and keep what it knows, turn off **Adapt to My Adjustments**. Lessons are in `choices.jsonl`,
+on your Mac only. To start over, click **Forget Everything Learned**.
 
 ## Sunset and sunrise
 
@@ -186,7 +188,7 @@ The engine uses these records in two ways:
   to 2 hours.
 
 Red Light shows at most one notification a day about an adopted change. `learned.json` stores the adopted
-values and their history. To clear them, run `redlight forget`.
+values and their history. To clear them and your night's lessons, run `redlight forget`.
 
 ## Files
 
@@ -195,7 +197,7 @@ Red Light stores its files in `~/Library/Application Support/RedLight`:
 | File | Contents |
 | --- | --- |
 | `config.json` | The night preset, day defaults, location and its source, fade length, learning settings, presets, and shortcuts. |
-| `state.json` | The master switch, mode, day snapshot, current transition, pause, true-color hold, and room light. |
+| `state.json` | The master switch, mode, day snapshot, current transition, pause, true-color hold, room light, tonight's nudge, and anything held for now. |
 | `learned.json` | Adopted defaults and their history. |
 | `choices.jsonl` | What you chose at night: the time, the kind of room, and the value. Your night's curves are built from these. |
 | `events.jsonl` | Recorded manual changes, removed after the lookback window. |
