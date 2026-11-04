@@ -33,9 +33,8 @@
 
 - **Native.** A Control Center panel in your menu bar.
 - **Gradual.** Blue fades out over 30 minutes after sunset and comes back at sunrise.
-- **Room-aware.** Remembers your red and keyboard backlight for dark, dim, and lit rooms, and follows the lamps.
-- **Presets.** Dusk, Night, Movie, and Deep night set the display, keyboard, and screen shade at once.
-- **Adaptive.** Settings you choose on 3 of 14 nights become your defaults.
+- **Predictive.** Red deepens as the night goes on and follows the lamps in your room, and every adjustment teaches it, so you stop touching the sliders.
+- **Presets.** Dusk, Night, Movie, and Deep night set the display, keyboard, and screen shade for now.
 - **True color.** Figma, Sketch, and Photoshop get accurate color while they're in front.
 - **Dimmer keys.** Extra Dim 1 to 4: four keyboard backlight levels below macOS's minimum.
 
