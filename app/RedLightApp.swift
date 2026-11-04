@@ -1846,7 +1846,7 @@ struct TextRow: View {
 /// The night ahead: how deep the red goes, sunset to sunrise, in a dark room and (fainter) a dim one, with a dot at now.
 struct NightChart: View {
     let f: Forecast
-    private let red = Color(red: 1, green: 0.26, blue: 0.2)
+    private let red = Color(nsColor: .systemRed)
     private func x(_ t: Double, _ w: CGFloat) -> CGFloat { CGFloat((t - f.from) / max(1, f.to - f.from)) * w }
     private func y(_ v: Double, _ h: CGFloat) -> CGFloat { h - CGFloat(v) * (h - 2) - 1 }
     private func line(_ pts: [[Double]], _ w: CGFloat, _ h: CGFloat) -> Path {
@@ -1854,8 +1854,16 @@ struct NightChart: View {
         for (i, q) in pts.enumerated() { let pt = CGPoint(x: x(q[0], w), y: y(q[1], h)); if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) } }
         return p
     }
+    /// The line closed down to the chart's foot, for the fill beneath it.
+    private func area(_ pts: [[Double]], _ w: CGFloat, _ h: CGFloat) -> Path {
+        guard let first = pts.first, let last = pts.last else { return Path() }
+        var p = line(pts, w, h)
+        p.addLine(to: CGPoint(x: x(last[0], w), y: h)); p.addLine(to: CGPoint(x: x(first[0], w), y: h)); p.closeSubpath()
+        return p
+    }
+    /// Every third hour, the way this Mac writes the time: "9 PM", or "21" with a 24-hour clock.
     private var ticks: [(Double, String)] {
-        let fmt = DateFormatter(); fmt.dateFormat = "h a"
+        let fmt = DateFormatter(); fmt.setLocalizedDateFormatFromTemplate("j")
         var d = Calendar.current.dateInterval(of: .hour, for: Date(timeIntervalSince1970: f.from))!.end, out: [(Double, String)] = []
         while d.timeIntervalSince1970 < f.to {
             if Calendar.current.component(.hour, from: d) % 3 == 0 { out.append((d.timeIntervalSince1970, fmt.string(from: d))) }
@@ -1865,28 +1873,30 @@ struct NightChart: View {
     }
     var body: some View {
         let dark = f.rooms["dark"] ?? [], dim = f.rooms["dim"] ?? []
-        let here = f.rooms[f.room] ?? dark
-        let now = here.min { abs($0[0] - f.now) < abs($1[0] - f.now) }
+        // Early on a long evening the nearest sunrise is still this morning, so the engine gives last night and `now` falls
+        // past its end: no dot, at night. The curve goes by the clock, so last night's line is tonight's, a day on.
+        let t = f.now > f.to ? f.now - 86400 : f.now
+        // On the line of the room you're in; with no room known you're on neither.
+        let now = t >= f.from && t <= f.to ? f.rooms[f.room]?.min { abs($0[0] - t) < abs($1[0] - t) } : nil
         VStack(spacing: 4) {
             GeometryReader { g in
                 let w = g.size.width, h = g.size.height
                 ZStack(alignment: .topLeading) {
-                    var fill = line(dark, w, h)
-                    let end = x(dark.last?[0] ?? f.to, w)
-                    let _ = (fill.addLine(to: CGPoint(x: end, y: h)), fill.addLine(to: CGPoint(x: 0, y: h)), fill.closeSubpath())
-                    fill.fill(LinearGradient(colors: [red.opacity(0.28), red.opacity(0.02)], startPoint: .top, endPoint: .bottom))
+                    area(dark, w, h).fill(LinearGradient(colors: [red.opacity(0.28), red.opacity(0.02)], startPoint: .top, endPoint: .bottom))
                     line(dim, w, h).stroke(red.opacity(0.4), style: StrokeStyle(lineWidth: 1, lineCap: .round))
                     line(dark, w, h).stroke(red, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-                    if let n = now, f.now >= f.from, f.now <= f.to {
-                        Circle().fill(Color.white).frame(width: 7, height: 7).shadow(color: .black.opacity(0.35), radius: 1)
-                            .position(x: x(n[0], w), y: y(n[1], h))
-                    }
+                    if let n = now { Circle().fill(CC.label).frame(width: 7, height: 7).position(x: x(n[0], w), y: y(n[1], h)) }
                 }
             }.frame(height: 56)
             GeometryReader { g in
-                ForEach(ticks, id: \.0) { t in Text(t.1).font(.system(size: 10)).foregroundStyle(CC.secondary).fixedSize().position(x: x(t.0, g.size.width), y: 6) }
-            }.frame(height: 12)
+                let w = g.size.width
+                // A label centred near either end would stick out past the chart and the panel's margin: left out instead.
+                ForEach(ticks.filter { x($0.0, w) >= 18 && x($0.0, w) <= w - 18 }, id: \.0) { t in
+                    Text(t.1).font(CC.subtitle).foregroundStyle(CC.secondary).fixedSize().position(x: x(t.0, w), y: 7)
+                }
+            }.frame(height: 14)
         }
+        .help("Red Shift through the night, in a dark room and, fainter, a dim one")
     }
 }
 struct SettingsRow: View {
