@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Red Light uninstaller: restores the normal display, unloads the agent, removes the app and the engine.
-# Your settings and what it learned (config.json, learned.json, events.jsonl, redlight.log) stay in
+# Your settings and what it learned (config.json, learned.json, choices.jsonl, events.jsonl, redlight.log) stay in
 # ~/Library/Application Support/RedLight for a later install. `./uninstall.sh --all` deletes them too.
 set -e
 case "$1" in ""|--all) ;; *) echo "usage: ./uninstall.sh [--all]"; exit 2 ;; esac

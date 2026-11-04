@@ -840,6 +840,8 @@ final class RoomSensor {
         return (hidCopyServices(c)?.takeRetainedValue() as? [AnyObject])?.first
     }()
     private var client: AnyObject?
+    /// Whether this Mac has one at all, lid open or closed.
+    var present: Bool { service != nil }
     func lux() -> Double? {
         let root = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
         let closed = IORegistryEntryCreateCFProperty(root, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Bool
@@ -1330,6 +1332,9 @@ final class Model: ObservableObject {
     /// night has the red, but the Auto row stayed dark however often it was pressed.
     var nothingHeld: Bool { nightIsAuto && state?.holdRed == nil && state?.holdKeys == nil }
     func backToAuto() { runCLI(["auto"]) }
+    /// The curve is what the night will do only with a room to go by. Without a sensor (a Mac mini) or with Match Room
+    /// Light off, the night is the schedule's own steady level, as it always was, and a chart of a deepening curve isn't true.
+    var nightFollowsCurve: Bool { roomSensor.present && (config.roomLight?.enabled ?? true) }
     @Published var forecast: Forecast?
     /// Settings is on screen: every refresh brings the chart up to date, as forgetting, a new location or Adapt to My
     /// Adjustments change the curve under it, and the page can stay open for hours with its dot left behind. (Read once
@@ -1397,7 +1402,7 @@ final class Model: ObservableObject {
     func force(_ mode: String) { runCLI([mode]) }
     func pause(_ arg: String) { runCLI(["pause", arg]) }
     func resume() { runCLI(["resume"]) }
-    func forget() { runCLI(["forget"]) }
+    func forget() { runCLI(["forget"]); loadForecast() }       // queued behind it: the chart goes back to the starting curve
     func setShade(enabled: Bool? = nil, level: Double? = nil) {
         guard !isOff else { return }
         bringBackIfHeld()
@@ -2149,8 +2154,8 @@ struct SettingsPage: View {
             Line()
 
             Header(text: "Your Night")
-            // Only while it is what happens: with Match Room Light off the night is your own level, not this curve.
-            if let f = m.forecast, m.config.roomLight?.enabled ?? true { NightChart(f: f).padding(.vertical, 6) }
+            // Only while it is what happens: without a sensor, or with Match Room Light off, the night is your own level.
+            if let f = m.forecast, m.nightFollowsCurve { NightChart(f: f).padding(.vertical, 6) }
             ToggleRow(label: "Match Room Light", isOn: Binding(get: { m.config.roomLight?.enabled ?? true }, set: {
                 var r = m.config.roomLight ?? RoomLight(); r.enabled = $0; m.config.roomLight = r
                 m.saveConfig(reapply: false); m.runCLI(["room"])           // queued behind the save: on eases to the room, off draws your level
@@ -2164,6 +2169,9 @@ struct SettingsPage: View {
                 TextRow(text: "Adopts what you keep choosing after three similar nights", secondary: true)
             } else {
                 ForEach(m.learned.history.suffix(3).reversed(), id: \.self) { TextRow(text: $0, secondary: true) }
+            }
+            // Lessons aren't in the history: a slider move in a known room adds none, so months of them left nothing to click.
+            if !m.learned.history.isEmpty || (m.forecast?.lessons ?? 0) > 0 {
                 TextRow(text: "Forget Everything Learned").onTapGesture { m.forget() }
             }
             Line()

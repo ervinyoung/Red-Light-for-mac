@@ -344,7 +344,9 @@ func blend(_ from: Settings, _ to: Settings, _ t: Double) -> Settings {
 
 // MARK: - Sunrise / sunset (NOAA)
 func sunTimes(lat: Double, lon: Double, date: Date) -> (rise: Date?, set: Date?) {
-    let cal = Calendar.current
+    // Gregorian whatever this Mac's calendar: `toDate` below reads these year, month and day as Gregorian ones. A Thai
+    // (2569) or Japanese (Reiwa 8) year put every sunrise and sunset centuries away, and each check called it night, all day.
+    var cal = Calendar(identifier: .gregorian); cal.timeZone = .current
     let startOfDay = cal.startOfDay(for: date)
     let jd = startOfDay.timeIntervalSince1970 / 86400.0 + 2440587.5
     func rad(_ d: Double) -> Double { d * .pi / 180 }
@@ -406,7 +408,7 @@ func isNight(cfg: Config, learned: Learned, now: Date) -> Bool {
         if let last = ts.last(where: { $0.at <= now }) { return last.night }
         if let next = ts.first { return !next.night }   // a location far east of the Mac's zone: its day starts later
     }
-    let m = Calendar.current.component(.month, from: now)   // polar day or night: no sunrise or sunset for days
+    let m = Calendar(identifier: .gregorian).component(.month, from: now)   // polar day or night: no sunrise or sunset for days
     return cfg.latitude > 0 ? (m >= 10 || m <= 3) : (m >= 4 && m <= 9)
 }
 /// The transition that most recently began (for computing fade progress after a sleep).
@@ -781,24 +783,33 @@ func roomKind(lux: Double, was: String?) -> String {
 //    curve is right, and it stays right.
 //  - Tonight a choice also shifts the red at once, exactly to what you set, and fades back onto the curve (`roomRed`).
 // Backtested on those choices, each predicted from the ones before it: 18 points off with one number per room, 8 with this.
-struct Choice: Codable { var t: Date; var field: String; var room: String; var value: Double }
+/// `clock`: the night clock where you were when you chose. `t` read in today's zone moved every lesson by the difference
+/// after a flight: 11 PM at home counted as 2 AM in New York, when 11 PM is what you meant, wherever you are.
+struct Choice: Codable { var t: Date; var field: String; var room: String; var value: Double; var clock: Double? = nil
+    var hour: Double { clock ?? nightClock(t) } }
 struct Nudge: Codable { var delta: Double; var at: Date; var room: String }
 let choicesURL = appDir.appendingPathComponent("choices.jsonl")
 let lineEnc: JSONEncoder = { let e = JSONEncoder(); e.outputFormatting = [.sortedKeys]; e.dateEncodingStrategy = .iso8601; return e }()
-func loadChoices() -> [Choice] {
-    ((try? String(contentsOf: choicesURL, encoding: .utf8)) ?? "").split(separator: "\n").compactMap { try? dec.decode(Choice.self, from: Data($0.utf8)) }
+/// Line by line, from the bytes: a bad line costs only itself. Read as text, one stray byte failed the whole file and a
+/// hand-edit's CRLF (a single Character, so nothing split) made it one long line: no lessons, and the next save wrote
+/// over them all.
+func choiceLines() -> [(raw: Data, choice: Choice?)] {
+    ((try? Data(contentsOf: choicesURL)) ?? Data()).split(separator: 0x0A).map { (Data($0), try? dec.decode(Choice.self, from: Data($0))) }
 }
+func loadChoices() -> [Choice] { choiceLines().compactMap { $0.choice } }
 /// A drag is one choice: the last of a burst replaces the rest, with the other slider touched in between or not. A value
 /// of 0 is Off, no lesson: it only takes back the burst it ended, or the 15 % a drag passes on its way there would stay
-/// behind as one. The newest 400 are kept.
-func saveChoice(_ c: Choice) {
-    var all = loadChoices()
-    if let i = all.lastIndex(where: { $0.field == c.field }), all[i].room == c.room, c.t.timeIntervalSince(all[i].t) < 45 { all.remove(at: i) }
-    if c.value > 0 { all.append(c) }
-    all = Array(all.suffix(400))
-    let text = all.compactMap { (try? lineEnc.encode($0)).flatMap { String(data: $0, encoding: .utf8) } }.joined(separator: "\n") + "\n"
-    try? text.write(to: choicesURL, atomically: true, encoding: .utf8)
-    roomChoices = all
+/// behind as one. The newest 400 are kept. What can't be read stays in the file as it was: it may be one typo from a
+/// lesson, and it's yours.
+func saveChoice(_ choice: Choice) {
+    var c = choice; c.clock = c.hour
+    var lines = choiceLines()
+    if let i = lines.lastIndex(where: { $0.choice?.field == c.field }), let l = lines[i].choice, l.room == c.room, c.t.timeIntervalSince(l.t) < 45 { lines.remove(at: i) }
+    if c.value > 0, let new = try? lineEnc.encode(c) { lines.append((new, c)) }
+    var extra = lines.filter { $0.choice != nil }.count - 400
+    lines.removeAll { if $0.choice != nil && extra > 0 { extra -= 1; return true }; return false }
+    try? Data(lines.flatMap { $0.raw + [0x0A] }).write(to: choicesURL, options: .atomic)
+    roomChoices = lines.compactMap { $0.choice }
 }
 /// Minutes since noon, so a night is one unbroken line across midnight. By the clock, not the sun: bedtime doesn't move
 /// when the sunset does.
@@ -834,7 +845,7 @@ func nearInTime(_ a: Double, _ b: Double) -> Double { let d = abs(a - b); return
 func predictRed(_ kind: String, at d: Date) -> Double {
     let u = nightClock(d); var num = 0.0, den = 0.0
     for (age, c) in roomChoices.filter({ $0.field == "red" }).reversed().enumerated() {
-        let cu = nightClock(c.t); var w = nearInTime(u, cu) * pow(0.97, Double(age)), off = c.value - redPrior(cu, c.room)
+        let cu = c.hour; var w = nearInTime(u, cu) * pow(0.97, Double(age)), off = c.value - redPrior(cu, c.room)
         if c.room != kind {
             if c.room == "lit" || kind == "lit" { continue }
             w /= 2; off *= kind == "dim" ? 0.5 : 2                       // dark and dim share what they learn, at their scale
@@ -846,7 +857,7 @@ func predictRed(_ kind: String, at d: Date) -> Double {
 func predictKeys(_ kind: String, at d: Date) -> Double {
     let u = nightClock(d); var num = 0.0, den = 0.0
     for (age, c) in roomChoices.filter({ $0.field == "keys" && $0.room == kind }).reversed().enumerated() {
-        let cu = nightClock(c.t), w = nearInTime(u, cu) * pow(0.97, Double(age))
+        let cu = c.hour, w = nearInTime(u, cu) * pow(0.97, Double(age))
         num += w * (log(max(1, c.value)) - keysPrior(cu, kind)); den += w
     }
     return exp(keysPrior(u, kind) + num / (2 + den))
@@ -884,6 +895,8 @@ func roomRed(_ now: Date) -> Double {
     guard let kind = roomKindNow else { return 0 }
     if let h = roomHoldRed { return h }
     var p = predictRed(kind, at: now)
+    // Its own room always, a lit room included: there a nudge counted for nothing, so 30 % set by hand showed the third
+    // of it the lesson gives, and a 2.5 user who had kept red on with the lights on couldn't get it back.
     if let n = roomNudge, n.room == kind || (kind != "lit" && n.room != "lit") {
         let age = now.timeIntervalSince(n.at)
         if age < 12 * 3600 { p += n.delta * (n.room == kind ? 1 : 0.5) * pow(0.5, age / 7200) }
@@ -1100,7 +1113,7 @@ case "forecast":
         }
     }
     let out: [String: Any] = ["from": from.timeIntervalSince1970, "to": to.timeIntervalSince1970, "now": now.timeIntervalSince1970,
-                              "room": st?.room?.kind ?? "", "rooms": rooms, "lessons": roomChoices.count]
+                              "room": st?.room?.kind ?? "", "rooms": rooms, "lessons": loadChoices().count]   // with learning off too: they can still be forgotten
     if let d = try? JSONSerialization.data(withJSONObject: out), let t = String(data: d, encoding: .utf8) { print(t) }
 case "night", "day":
     var st = loadState()
