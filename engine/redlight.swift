@@ -642,7 +642,9 @@ func startTransition(to mode: String, cfg: Config, learned: Learned, state: Stat
     }
     st.mode = mode
     st.ramp = nil
-    clearNight(&st)                                  // a new day or night: nothing held over, tonight's nudge is spent
+    // A new night: nothing held over, last night's nudge is spent. Not at sunrise: what you chose rides the fade out (Off
+    // at 5 AM came back as full red at the fade's first minute). By day it counts for nothing, and sunset clears it.
+    if mode == "night" { clearNight(&st) }
     roomNightness = nightness(st, now: now)
     // If we woke up mid-transition, pick the fade up where the clock says it should be.
     let began = since ?? now
@@ -786,11 +788,14 @@ let lineEnc: JSONEncoder = { let e = JSONEncoder(); e.outputFormatting = [.sorte
 func loadChoices() -> [Choice] {
     ((try? String(contentsOf: choicesURL, encoding: .utf8)) ?? "").split(separator: "\n").compactMap { try? dec.decode(Choice.self, from: Data($0.utf8)) }
 }
-/// A drag is one choice: the last of a burst replaces the rest. The newest 400 are kept.
+/// A drag is one choice: the last of a burst replaces the rest, with the other slider touched in between or not. A value
+/// of 0 is Off, no lesson: it only takes back the burst it ended, or the 15 % a drag passes on its way there would stay
+/// behind as one. The newest 400 are kept.
 func saveChoice(_ c: Choice) {
     var all = loadChoices()
-    if let l = all.last, l.field == c.field, l.room == c.room, c.t.timeIntervalSince(l.t) < 45 { all.removeLast() }
-    all.append(c); all = Array(all.suffix(400))
+    if let i = all.lastIndex(where: { $0.field == c.field }), all[i].room == c.room, c.t.timeIntervalSince(all[i].t) < 45 { all.remove(at: i) }
+    if c.value > 0 { all.append(c) }
+    all = Array(all.suffix(400))
     let text = all.compactMap { (try? lineEnc.encode($0)).flatMap { String(data: $0, encoding: .utf8) } }.joined(separator: "\n") + "\n"
     try? text.write(to: choicesURL, atomically: true, encoding: .utf8)
     roomChoices = all
@@ -807,20 +812,22 @@ func along(_ pts: [(Double, Double)], _ u: Double) -> Double {
     return pts.last!.1
 }
 /// The curve for someone who has told Red Light nothing yet: 7 PM, 9 PM, 11 PM, 1 AM, 3 AM in a dark room, half that in
-/// a dim one, nothing with the lights on.
+/// a dim one, nothing with the lights on. From 10 AM it comes back down to meet itself at noon, where the night clock
+/// starts again: only a night that runs on past noon sees that (Turn On Now, a polar winter), and it fell 80 points there.
 func redPrior(_ u: Double, _ kind: String) -> Double {
-    let dark = along([(420, 0.20), (540, 0.30), (660, 0.55), (780, 0.80), (900, 1)], u)
+    let dark = along([(420, 0.20), (540, 0.30), (660, 0.55), (780, 0.80), (900, 1), (1320, 1), (1440, 0.20)], u)
     return kind == "dark" ? dark : kind == "dim" ? dark / 2 : 0
 }
 /// The keys, in the log of their PWM steps: dimmer as the night goes on, Extra Dim 1 the least a dark room gets.
 func keysPrior(_ u: Double, _ kind: String) -> Double {
     switch kind {
-    case "dark": return along([(600, log(4)), (720, log(2))], u)
-    case "dim":  return along([(600, log(21)), (720, log(9))], u)
+    case "dark": return along([(600, log(4)), (720, log(2)), (1320, log(2)), (1440, log(4))], u)
+    case "dim":  return along([(600, log(21)), (720, log(9)), (1320, log(9)), (1440, log(21))], u)
     default:     return log(54)
     }
 }
-func nearInTime(_ a: Double, _ b: Double) -> Double { exp(-pow((a - b) / 90, 2) / 2) }
+/// Around the clock: a lesson just before noon is near one just after it.
+func nearInTime(_ a: Double, _ b: Double) -> Double { let d = abs(a - b); return exp(-pow(min(d, 1440 - d) / 90, 2) / 2) }
 /// The curve at `d`: the prior, bent by the choices near that time of night. Two "choices' worth" of weight stay with
 /// the prior, so one nudge moves the curve about a third of the way and repeated ones take it the rest. Each newer choice
 /// counts a little over the one before it.
@@ -858,7 +865,7 @@ func kbFromTicks(_ t: Double) -> Double { t <= 0 ? 0 : t < 54 ? t / 54 * kbFloor
 /// without this feature — never off because the lid is closed.
 var roomLevel = 0.0, roomActive = false, roomNightness = 0.0, roomKindNow: String? = nil
 var roomEnabled = true, roomAdapts = true, roomChoices: [Choice] = []
-var roomNudge: Nudge? = nil, roomHoldRed: Double? = nil, roomHoldKeys: Double? = nil
+var roomNudge: Nudge? = nil, roomHoldRed: Double? = nil, roomHoldKeys: Double? = nil, roomSunsetFade = false
 func setRoomContext(cfg: Config, learned: Learned, state: State?, now: Date) {
     roomEnabled = (cfg.roomLight ?? RoomLight()).enabled
     roomAdapts = (cfg.learning ?? Learning()).enabled
@@ -868,26 +875,32 @@ func setRoomContext(cfg: Config, learned: Learned, state: State?, now: Date) {
     roomNudge = state?.nudgeRed; roomHoldRed = state?.holdRed; roomHoldKeys = state?.holdKeys
     roomLevel = roomRed(now)
     roomNightness = nightness(state, now: now)
+    roomSunsetFade = state?.mode == "night" && state?.ramp != nil
 }
 /// The red for this room now: a look held for now, or the curve plus tonight's nudge. A nudge lands exactly where you
-/// put it and fades onto the curve with a half-life of two hours, half as strong in the neighbouring room.
+/// put it and fades onto the curve with a half-life of two hours, half as strong in the neighbouring room. A lit room has
+/// no neighbour, but a nudge made in one lands there like any other: 30 % set with the lights on came out at 10 %.
 func roomRed(_ now: Date) -> Double {
     guard let kind = roomKindNow else { return 0 }
     if let h = roomHoldRed { return h }
     var p = predictRed(kind, at: now)
-    if let n = roomNudge, kind != "lit", n.room != "lit" {
+    if let n = roomNudge, n.room == kind || (kind != "lit" && n.room != "lit") {
         let age = now.timeIntervalSince(n.at)
         if age < 12 * 3600 { p += n.delta * (n.room == kind ? 1 : 0.5) * pow(0.5, age / 7200) }
     }
     return max(0, min(1, p))
 }
-/// You set the red at night: a lesson for the curve, and tonight's nudge. Off isn't a lesson, just off for now.
+/// You set the red at night: a lesson for the curve, and tonight's nudge. Off isn't a lesson, just off for now. The lesson
+/// is what you asked to see at this hour, never that read through a fade's progress: 15 % set three minutes into sunset
+/// taught 100 %, and climbed to 91 % by the end of the fade.
 func chooseRed(_ st: inout State, _ shown: Double, now: Date) {
     guard let kind = roomKindNow, roomNightness > 0 else { return }
-    let x = max(0, min(1, shown / roomNightness))
-    if x <= 0.01 { st.holdRed = 0; st.nudgeRed = nil }
-    else {
-        if roomAdapts { saveChoice(Choice(t: now, field: "red", room: kind, value: x)) }
+    let x = max(0, min(1, shown / (roomSunsetFade ? 1 : roomNightness)))
+    if x <= 0.01 {
+        if roomAdapts { saveChoice(Choice(t: now, field: "red", room: kind, value: 0)) }
+        st.holdRed = 0; st.nudgeRed = nil
+    } else {
+        if roomAdapts { saveChoice(Choice(t: now, field: "red", room: kind, value: max(0, min(1, shown)))) }
         st.holdRed = nil; st.nudgeRed = Nudge(delta: x - predictRed(kind, at: now), at: now, room: kind)
     }
     roomHoldRed = st.holdRed; roomNudge = st.nudgeRed; roomLevel = roomRed(now)
@@ -896,7 +909,7 @@ func chooseRed(_ st: inout State, _ shown: Double, now: Date) {
 /// The keys hold what you set until the room changes; the curve learns from it, except from off.
 func chooseKeys(_ st: inout State, _ b: Double, now: Date) {
     guard roomActive, roomNightness >= 0.999, let kind = roomKindNow else { return }
-    if roomAdapts && b > 0 { saveChoice(Choice(t: now, field: "keys", room: kind, value: kbTicksOf(b))) }
+    if roomAdapts { saveChoice(Choice(t: now, field: "keys", room: kind, value: kbTicksOf(b))) }
     st.holdKeys = b; roomHoldKeys = b
     log(String(format: "%@ room: you chose keyboard %.6f", kind, b))
 }
@@ -914,11 +927,13 @@ func nightness(_ st: State?, now: Date) -> Double {
     switch st.mode { case "night": return t ?? 1; case "day": return t.map { 1 - $0 } ?? 0; default: return 0 }
 }
 /// The warmth drawn for a scheduled one. At night, with a room to go by, it is the room's level now, faded in and out
-/// with the sunset and sunrise fades. Off (0: switched off, paused) stays off in any room.
+/// with the sunset and sunrise fades. Off (0: switched off, paused) stays off in any room. A red you chose during the
+/// sunset fade is the red you want from then on, so that fade stops scaling it (`clearNight` at sunset means anything
+/// here was chosen since). The sunrise fade always does: the red has to be gone by the end of it.
 func lifted(_ w: Double) -> Double {
     let w = max(0, min(1, w))
     guard roomActive, roomNightness > 0, w > 0.001 else { return w }
-    return roomLevel * roomNightness
+    return roomLevel * (roomSunsetFade && (roomHoldRed != nil || roomNudge != nil) ? 1 : roomNightness)
 }
 /// The keyboard level for this room now, once night has fully arrived (the sunset and sunrise fades ease the keys
 /// themselves) and the look is a night one: an off or paused look (no red) keeps its own keys, and so does
@@ -1224,7 +1239,7 @@ case "preset":
         // At night in a known kind of room, the preset's Red Shift becomes that room's level, like the slider.
         // A preset is for now: it holds until the room changes and teaches the curve nothing.
         if roomActive && roomNightness > 0, var st = loadState() {
-            st.holdRed = max(0, min(1, (s.warmth ?? 0) / roomNightness)); roomHoldRed = st.holdRed; roomLevel = roomRed(now)
+            st.holdRed = max(0, min(1, (s.warmth ?? 0) / (roomSunsetFade ? 1 : roomNightness))); roomHoldRed = st.holdRed; roomLevel = roomRed(now)
             if roomNightness >= 0.999, let b = s.keyboardBrightness { st.holdKeys = b; roomHoldKeys = b }
             saveState(st)
         }
