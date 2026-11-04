@@ -870,12 +870,13 @@ func setRoomContext(cfg: Config, learned: Learned, state: State?, now: Date) {
     roomNightness = nightness(state, now: now)
 }
 /// The red for this room now: a look held for now, or the curve plus tonight's nudge. A nudge lands exactly where you
-/// put it and fades onto the curve with a half-life of two hours, half as strong in the neighbouring room.
+/// put it and fades onto the curve with a half-life of two hours, half as strong in the neighbouring room. A lit room has
+/// no neighbour, but a nudge made in one lands there like any other: 30 % set with the lights on came out at 10 %.
 func roomRed(_ now: Date) -> Double {
     guard let kind = roomKindNow else { return 0 }
     if let h = roomHoldRed { return h }
     var p = predictRed(kind, at: now)
-    if let n = roomNudge, kind != "lit", n.room != "lit" {
+    if let n = roomNudge, n.room == kind || (kind != "lit" && n.room != "lit") {
         let age = now.timeIntervalSince(n.at)
         if age < 12 * 3600 { p += n.delta * (n.room == kind ? 1 : 0.5) * pow(0.5, age / 7200) }
     }
