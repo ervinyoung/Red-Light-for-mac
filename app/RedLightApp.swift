@@ -1053,6 +1053,9 @@ final class Model: ObservableObject {
     /// Slider steps queued for the engine and not yet applied. While any are, what the engine reports is a step
     /// behind the finger, and reading it back would snap the thumb, the header and the screen back to that step.
     private var setsInFlight = 0
+    /// The keyboard slider sends nothing until you let go, so no step is in flight; a status landing mid-drag (the minute's
+    /// check, a room change) put the old level back in the header and, through syncKeyboardHold, on the keys.
+    private var keysUnderFinger = false
     private var shadesInFlight = 0          // shade on/off and level queued for shade.json and not yet written
     private var hotkeysLive: Bool?          // whether the shortcuts were last registered for on (true) or off (false)
 
@@ -1252,7 +1255,7 @@ final class Model: ObservableObject {
             let sun = cli("suntimes").trimmingCharacters(in: .whitespacesAndNewlines)
             let status = cli("status")
             // Steps queued after this status (the queue is serial) make it stale; the final step refreshes again.
-            DispatchQueue.main.async { guard let self = self else { return }; self.sunLine = sun; if self.setsInFlight == 0 { self.parseLive(status) } }
+            DispatchQueue.main.async { guard let self = self else { return }; self.sunLine = sun; if self.setsInFlight == 0 && !self.keysUnderFinger { self.parseLive(status) } }
         }
     }
     /// Off and true colour both mean the display is drawn exactly as macOS would draw it, whatever shade.json says.
@@ -1541,6 +1544,7 @@ final class Model: ObservableObject {
     /// The keyboard slider: the change shows at once on the keys; the engine records it when you let go.
     func setKeyboard(ticks: Double, final: Bool) {
         let v = kbValue(ticks)
+        keysUnderFinger = !final
         live.keyboardBrightness = v; lastKeyboard = v; live.keyboardAutoBrightness = false
         keyboardHold.update(keyboardWant(v), idleSeconds: live.keyboardIdleDimSeconds ?? 5)
         if final { set("keyboard", v > 0 ? String(format: "%.6f", v * 100) : "off") }
