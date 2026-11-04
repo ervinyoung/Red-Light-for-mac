@@ -888,7 +888,9 @@ func roomRed(_ now: Date) -> Double {
     guard let kind = roomKindNow else { return 0 }
     if let h = roomHoldRed { return h }
     var p = predictRed(kind, at: now)
-    if let n = roomNudge, kind != "lit", n.room != "lit" {
+    // Its own room always, a lit room included: there a nudge counted for nothing, so 30 % set by hand showed the third
+    // of it the lesson gives, and a 2.5 user who had kept red on with the lights on couldn't get it back.
+    if let n = roomNudge, n.room == kind || (kind != "lit" && n.room != "lit") {
         let age = now.timeIntervalSince(n.at)
         if age < 12 * 3600 { p += n.delta * (n.room == kind ? 1 : 0.5) * pow(0.5, age / 7200) }
     }
