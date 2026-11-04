@@ -2155,7 +2155,7 @@ struct SettingsPage: View {
                 var r = m.config.roomLight ?? RoomLight(); r.enabled = $0; m.config.roomLight = r
                 m.saveConfig(reapply: false); m.runCLI(["room"])           // queued behind the save: on eases to the room, off draws your level
             }), drawn: m.snapshotMode)
-            TextRow(text: "Red Shift and the keyboard follow the hour and the room's light, and every adjustment you make teaches them. Presets are just for now.", secondary: true)
+            TextRow(text: "Red Shift and the keyboard follow the hour and the room’s light, and learn from your adjustments. A preset lasts until the room changes.", secondary: true)
             Line()
 
             Header(text: "Learning")
