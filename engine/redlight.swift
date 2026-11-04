@@ -2,7 +2,7 @@
 // and quietly learns from manual adjustments.
 // Usage: redlight check | night | day | pause <min>|sunrise | resume | set <field> <value> | preset … |
 //        shade … | location <lat> <lon> [auto|manual] | reapply | status | suntimes | learned | forget |
-//        on | off | hold <app> | release | room | curve
+//        on | off | hold <app> | release | room | auto | forecast | curve
 import Foundation
 import IOKit
 
@@ -85,47 +85,13 @@ struct Learning: Codable {
     }
 }
 struct Preset: Codable { var name: String; var icon: String; var settings: Settings }
-/// Let the room's light set Red Shift at night: a level for each kind of room (see `roomKind`). Lenient, like `Learning`.
+/// Let the room's light, with the time of night, set Red Shift and the keys (see "Your night"). Lenient, like `Learning`.
 struct RoomLight: Codable {
     var enabled = true
-    /// The Red Shift for each kind of room at night, as you last chose it there (see `roomKind`).
-    var levels = RoomLevels()
-    /// The keyboard backlight for each kind of room at night, likewise: darker room, dimmer keys.
-    var keyboard = RoomKeys()
     init() {}
     init(from d: Decoder) throws {
-        guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }      // `"roomLight": false`: as in Learning
-        enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? true
-        levels = (try? c.decode(RoomLevels.self, forKey: .levels)) ?? RoomLevels()
-        keyboard = (try? c.decode(RoomKeys.self, forKey: .keyboard)) ?? RoomKeys()
-    }
-}
-/// Eyes adapted to a dark room need the least light on the keys: Extra Dim 1 in the dark, the top of the extra-dim
-/// range (Extra Dim 4) in a dim room, macOS's own minimum with the lights on.
-struct RoomKeys: Codable {
-    var dark = extraDimLevels[0], dim = extraDimLevels[3], lit = kbFloor
-    init() {}
-    init(from d: Decoder) throws {
-        let c = try d.container(keyedBy: CodingKeys.self), z = RoomKeys.init()
-        func v(_ k: CodingKeys, _ dflt: Double) -> Double { max(0, min(1, (try? c.decode(Double.self, forKey: k)) ?? dflt)) }
-        dark = v(.dark, z.dark); dim = v(.dim, z.dim); lit = v(.lit, z.lit)
-    }
-    subscript(kind kind: String) -> Double {
-        get { kind == "dark" ? dark : kind == "dim" ? dim : lit }
-        set { switch kind { case "dark": dark = newValue; case "dim": dim = newValue; default: lit = newValue } }
-    }
-}
-struct RoomLevels: Codable {
-    var dark = 0.45, dim = 0.25, lit = 0.0
-    init() {}
-    init(from d: Decoder) throws {
-        let c = try d.container(keyedBy: CodingKeys.self), z = RoomLevels.init()
-        func v(_ k: CodingKeys, _ dflt: Double) -> Double { max(0, min(1, (try? c.decode(Double.self, forKey: k)) ?? dflt)) }
-        dark = v(.dark, z.dark); dim = v(.dim, z.dim); lit = v(.lit, z.lit)
-    }
-    subscript(kind kind: String) -> Double {
-        get { kind == "dark" ? dark : kind == "dim" ? dim : lit }
-        set { switch kind { case "dark": dark = newValue; case "dim": dim = newValue; default: lit = newValue } }
+        let c = try? d.container(keyedBy: CodingKeys.self)
+        enabled = (try? c?.decode(Bool.self, forKey: .enabled)) ?? true
     }
 }
 struct Config: Codable {
@@ -187,8 +153,12 @@ struct State: Codable {
     var customTintHeld: Bool?
     /// When `night`/`day` ("Turn On Now") overrode the schedule. The override stands until the schedule next turns.
     var forcedAt: Date?
-    /// The room as last sensed: its `kind` (dark, dim or lit) and the level that kind has (`target`, `darkness`).
+    /// The room as last sensed: its `kind` (dark, dim or lit) and the level it was given (`target`, `darkness`).
     var room: Room?
+    /// Tonight's nudge to the red (see `roomRed`), and "for now" looks: a preset or Off holds until the room changes.
+    var nudgeRed: Nudge?
+    var holdRed: Double?
+    var holdKeys: Double?
 }
 struct Room: Codable { var lux: Double; var target: Double; var darkness: Double; var at: Date; var kind: String? }
 struct Learned: Codable {
@@ -672,6 +642,7 @@ func startTransition(to mode: String, cfg: Config, learned: Learned, state: Stat
     }
     st.mode = mode
     st.ramp = nil
+    clearNight(&st)                                  // a new day or night: nothing held over, tonight's nudge is spent
     roomNightness = nightness(st, now: now)
     // If we woke up mid-transition, pick the fade up where the clock says it should be.
     let began = since ?? now
@@ -797,17 +768,143 @@ func roomKind(lux: Double, was: String?) -> String {
     default:     return lux < 5 ? "dark" : lux < 20 ? "dim" : "lit"
     }
 }
-/// The room's level, and whether there is a room to go by: no sensor reading means the schedule's own level, as
+// MARK: - Your night
+// What you want from the red and the keys comes down to two things: how late it is, and what kind of room you're in.
+// Two months of slider moves say so: 15-30 % around 8 PM, 45 % at 10, 70-80 % by midnight, all of it after 1, with
+// nothing at all in a lit room. One remembered number per room meant dragging it down every evening and up every night.
+// So each kind of room has a curve over the night: `redPrior`, shaped by those two months, bent by your own choices.
+//  - A choice (the slider, the brightness keys) is a lesson: it bends the curve around that time of night, for tonight
+//    and every night after, in that room and half as much in its neighbour (`predictRed`).
+//  - Lessons fade only as newer ones arrive, never with time: when you stop touching the sliders it's because the
+//    curve is right, and it stays right.
+//  - Tonight a choice also shifts the red at once, exactly to what you set, and fades back onto the curve (`roomRed`).
+// Backtested on those choices, each predicted from the ones before it: 18 points off with one number per room, 8 with this.
+struct Choice: Codable { var t: Date; var field: String; var room: String; var value: Double }
+struct Nudge: Codable { var delta: Double; var at: Date; var room: String }
+let choicesURL = appDir.appendingPathComponent("choices.jsonl")
+let lineEnc: JSONEncoder = { let e = JSONEncoder(); e.outputFormatting = [.sortedKeys]; e.dateEncodingStrategy = .iso8601; return e }()
+func loadChoices() -> [Choice] {
+    ((try? String(contentsOf: choicesURL, encoding: .utf8)) ?? "").split(separator: "\n").compactMap { try? dec.decode(Choice.self, from: Data($0.utf8)) }
+}
+/// A drag is one choice: the last of a burst replaces the rest. The newest 400 are kept.
+func saveChoice(_ c: Choice) {
+    var all = loadChoices()
+    if let l = all.last, l.field == c.field, l.room == c.room, c.t.timeIntervalSince(l.t) < 45 { all.removeLast() }
+    all.append(c); all = Array(all.suffix(400))
+    let text = all.compactMap { (try? lineEnc.encode($0)).flatMap { String(data: $0, encoding: .utf8) } }.joined(separator: "\n") + "\n"
+    try? text.write(to: choicesURL, atomically: true, encoding: .utf8)
+    roomChoices = all
+}
+/// Minutes since noon, so a night is one unbroken line across midnight. By the clock, not the sun: bedtime doesn't move
+/// when the sunset does.
+func nightClock(_ d: Date) -> Double {
+    let c = Calendar.current.dateComponents([.hour, .minute], from: d)
+    return Double(((c.hour ?? 0) * 60 + (c.minute ?? 0) + 720) % 1440)
+}
+func along(_ pts: [(Double, Double)], _ u: Double) -> Double {
+    if u <= pts[0].0 { return pts[0].1 }
+    for (a, b) in zip(pts, pts.dropFirst()) where u <= b.0 { return a.1 + (b.1 - a.1) * (u - a.0) / (b.0 - a.0) }
+    return pts.last!.1
+}
+/// The curve for someone who has told Red Light nothing yet: 7 PM, 9 PM, 11 PM, 1 AM, 3 AM in a dark room, half that in
+/// a dim one, nothing with the lights on.
+func redPrior(_ u: Double, _ kind: String) -> Double {
+    let dark = along([(420, 0.20), (540, 0.30), (660, 0.55), (780, 0.80), (900, 1)], u)
+    return kind == "dark" ? dark : kind == "dim" ? dark / 2 : 0
+}
+/// The keys, in the log of their PWM steps: dimmer as the night goes on, Extra Dim 1 the least a dark room gets.
+func keysPrior(_ u: Double, _ kind: String) -> Double {
+    switch kind {
+    case "dark": return along([(600, log(4)), (720, log(2))], u)
+    case "dim":  return along([(600, log(21)), (720, log(9))], u)
+    default:     return log(54)
+    }
+}
+func nearInTime(_ a: Double, _ b: Double) -> Double { exp(-pow((a - b) / 90, 2) / 2) }
+/// The curve at `d`: the prior, bent by the choices near that time of night. Two "choices' worth" of weight stay with
+/// the prior, so one nudge moves the curve about a third of the way and repeated ones take it the rest. Each newer choice
+/// counts a little over the one before it.
+func predictRed(_ kind: String, at d: Date) -> Double {
+    let u = nightClock(d); var num = 0.0, den = 0.0
+    for (age, c) in roomChoices.filter({ $0.field == "red" }).reversed().enumerated() {
+        let cu = nightClock(c.t); var w = nearInTime(u, cu) * pow(0.97, Double(age)), off = c.value - redPrior(cu, c.room)
+        if c.room != kind {
+            if c.room == "lit" || kind == "lit" { continue }
+            w /= 2; off *= kind == "dim" ? 0.5 : 2                       // dark and dim share what they learn, at their scale
+        }
+        num += w * off; den += w
+    }
+    return max(0, min(1, redPrior(u, kind) + num / (2 + den)))
+}
+func predictKeys(_ kind: String, at d: Date) -> Double {
+    let u = nightClock(d); var num = 0.0, den = 0.0
+    for (age, c) in roomChoices.filter({ $0.field == "keys" && $0.room == kind }).reversed().enumerated() {
+        let cu = nightClock(c.t), w = nearInTime(u, cu) * pow(0.97, Double(age))
+        num += w * (log(max(1, c.value)) - keysPrior(cu, kind)); den += w
+    }
+    return exp(keysPrior(u, kind) + num / (2 + den))
+}
+/// The keys move in the steps the slider has, and stay put until the curve is clearly past the middle of a step.
+let keySteps = [2.0, 4, 9, 21, 54]
+func keysStep(_ t: Double, from now: Double?) -> Double {
+    if t > 60 { return t }
+    let near = keySteps.min { abs(log($0) - log(t)) < abs(log($1) - log(t)) }!
+    if let n = now, near != n, let cur = keySteps.first(where: { abs($0 - n) < 0.5 }), abs(log(t) - log(cur)) < abs(log(near) - log(cur)) * 0.6 { return cur }
+    return near
+}
+func kbFromTicks(_ t: Double) -> Double { t <= 0 ? 0 : t < 54 ? t / 54 * kbFloor : max(kbFloor, (t - 51.5) / 284.5) }
+
+/// The room's level now, and whether there is a room to go by: no sensor reading means the schedule's own level, as
 /// without this feature — never off because the lid is closed.
 var roomLevel = 0.0, roomActive = false, roomNightness = 0.0, roomKindNow: String? = nil
-var roomLevels = RoomLevels(), roomKeys = RoomKeys(), roomEnabled = true
+var roomEnabled = true, roomAdapts = true, roomChoices: [Choice] = []
+var roomNudge: Nudge? = nil, roomHoldRed: Double? = nil, roomHoldKeys: Double? = nil
 func setRoomContext(cfg: Config, learned: Learned, state: State?, now: Date) {
-    let r = cfg.roomLight ?? RoomLight()
-    roomLevels = r.levels; roomKeys = r.keyboard; roomEnabled = r.enabled
-    roomKindNow = r.enabled ? state?.room?.kind : nil
+    roomEnabled = (cfg.roomLight ?? RoomLight()).enabled
+    roomAdapts = (cfg.learning ?? Learning()).enabled
+    roomChoices = roomAdapts ? loadChoices() : []
+    roomKindNow = roomEnabled ? state?.room?.kind : nil
     roomActive = roomKindNow != nil
-    roomLevel = roomKindNow.map { roomLevels[kind: $0] } ?? 0
+    roomNudge = state?.nudgeRed; roomHoldRed = state?.holdRed; roomHoldKeys = state?.holdKeys
+    roomLevel = roomRed(now)
     roomNightness = nightness(state, now: now)
+}
+/// The red for this room now: a look held for now, or the curve plus tonight's nudge. A nudge lands exactly where you
+/// put it and fades onto the curve with a half-life of two hours, half as strong in the neighbouring room.
+func roomRed(_ now: Date) -> Double {
+    guard let kind = roomKindNow else { return 0 }
+    if let h = roomHoldRed { return h }
+    var p = predictRed(kind, at: now)
+    if let n = roomNudge, kind != "lit", n.room != "lit" {
+        let age = now.timeIntervalSince(n.at)
+        if age < 12 * 3600 { p += n.delta * (n.room == kind ? 1 : 0.5) * pow(0.5, age / 7200) }
+    }
+    return max(0, min(1, p))
+}
+/// You set the red at night: a lesson for the curve, and tonight's nudge. Off isn't a lesson, just off for now.
+func chooseRed(_ st: inout State, _ shown: Double, now: Date) {
+    guard let kind = roomKindNow, roomNightness > 0 else { return }
+    let x = max(0, min(1, shown / roomNightness))
+    if x <= 0.01 { st.holdRed = 0; st.nudgeRed = nil }
+    else {
+        if roomAdapts { saveChoice(Choice(t: now, field: "red", room: kind, value: x)) }
+        st.holdRed = nil; st.nudgeRed = Nudge(delta: x - predictRed(kind, at: now), at: now, room: kind)
+    }
+    roomHoldRed = st.holdRed; roomNudge = st.nudgeRed; roomLevel = roomRed(now)
+    log(String(format: "%@ room: you chose red %.0f%%", kind, x * 100))
+}
+/// The keys hold what you set until the room changes; the curve learns from it, except from off.
+func chooseKeys(_ st: inout State, _ b: Double, now: Date) {
+    guard roomActive, roomNightness >= 0.999, let kind = roomKindNow else { return }
+    if roomAdapts && b > 0 { saveChoice(Choice(t: now, field: "keys", room: kind, value: kbTicksOf(b))) }
+    st.holdKeys = b; roomHoldKeys = b
+    log(String(format: "%@ room: you chose keyboard %.6f", kind, b))
+}
+/// Back to the curve: tonight's nudge and anything held for now are gone.
+func clearNight(_ st: inout State) {
+    st.nudgeRed = nil; st.holdRed = nil; st.holdKeys = nil
+    roomNudge = nil; roomHoldRed = nil; roomHoldKeys = nil
+    if roomActive { roomLevel = roomRed(Date()) }
 }
 /// How far into night the schedule is: 0 by day, 1 at night, and the fade's progress in between, so the room's level
 /// rides the sunset fade in and the sunrise fade out rather than jumping at either.
@@ -816,14 +913,14 @@ func nightness(_ st: State?, now: Date) -> Double {
     let t = st.ramp.map { max(0, min(1, now.timeIntervalSince($0.start) / $0.seconds)) }
     switch st.mode { case "night": return t ?? 1; case "day": return t.map { 1 - $0 } ?? 0; default: return 0 }
 }
-/// The warmth drawn for a scheduled one. At night, with a room to go by, it is the level remembered for that kind of
-/// room, faded in and out with the sunset and sunrise fades. Off (0: switched off, paused) stays off in any room.
+/// The warmth drawn for a scheduled one. At night, with a room to go by, it is the room's level now, faded in and out
+/// with the sunset and sunrise fades. Off (0: switched off, paused) stays off in any room.
 func lifted(_ w: Double) -> Double {
     let w = max(0, min(1, w))
     guard roomActive, roomNightness > 0, w > 0.001 else { return w }
     return roomLevel * roomNightness
 }
-/// The keyboard level for this kind of room, once night has fully arrived (the sunset and sunrise fades ease the keys
+/// The keyboard level for this room now, once night has fully arrived (the sunset and sunrise fades ease the keys
 /// themselves) and the look is a night one: an off or paused look (no red) keeps its own keys, and so does
 /// auto-brightness. Nil when the room doesn't set the keys.
 func roomKeyboard(for s: Settings) -> Double? {
@@ -832,61 +929,46 @@ func roomKeyboard(for s: Settings) -> Double? {
     guard roomActive, roomNightness >= 0.999, let kind = roomKindNow,
           (s.keyboardAutoBrightness ?? kbIDs().first.map { kbGetBool("isAutoBrightnessEnabledForKeyboard:", $0) } ?? false) != true,
           (s.warmth ?? loadShade().base ?? 0) > 0.001 else { return nil }
-    return roomKeys[kind: kind]
-}
-/// Likewise for the keys: what you set at night in a kind of room is that room's keyboard level from then on.
-func rememberRoomKey(_ x: Double) {
-    guard roomActive, roomNightness >= 0.999, let kind = roomKindNow else { return }
-    // Taken for this run even when config.json can't be read (`set` runs on a placeholder then, so the pane's controls
-    // stay live): otherwise apply put the room's old level straight back over the slider.
-    roomKeys[kind: kind] = max(0, min(1, x))
-    if var c = loadConfig() { var r = c.roomLight ?? RoomLight(); r.keyboard[kind: kind] = roomKeys[kind: kind]; c.roomLight = r; saveConfig(c); roomKeys = r.keyboard }
-    log(String(format: "%@ room: keyboard %.6f from now on", kind, x))
-}
-/// What you set at night in a kind of room is that room's level from then on.
-func rememberRoomLevel(_ x: Double) {
-    guard let kind = roomKindNow, roomNightness > 0 else { return }
-    roomLevels[kind: kind] = max(0, min(1, x / roomNightness)); roomLevel = roomLevels[kind: kind]   // as for the keys
-    if var c = loadConfig() { var r = c.roomLight ?? RoomLight(); r.levels[kind: kind] = roomLevel; c.roomLight = r; saveConfig(c); roomLevels = r.levels }
-    log(String(format: "%@ room: red shift %.0f%% from now on", kind, roomLevel * 100))
+    if let h = roomHoldKeys { return h }
+    return kbFromTicks(keysStep(predictKeys(kind, at: Date()), from: loadCommanded().keyboardBrightness.map(kbTicksOf)))
 }
 /// Sets the room: `kind` from the app (its reading averaged, past the margins, held for seconds), or classified here
-/// from `lux` or the sensor. True if the drawn warmth is out of date.
+/// from `lux` or the sensor. A new kind of room lets go of anything held for now. True if the look is out of date.
 func senseRoom(_ st: inout State, now: Date, kind given: String? = nil, lux luxGiven: Double? = nil) -> Bool {
     let enabled = roomEnabled
     let lux = enabled ? (luxGiven ?? (given == nil ? roomLux() : nil)) : nil
     let kind = enabled ? (given ?? lux.map { roomKind(lux: $0, was: st.room?.kind) }) : nil, was = st.room?.kind
+    if kind != was { st.holdRed = nil; st.holdKeys = nil; roomHoldRed = nil; roomHoldKeys = nil }
     if let kind = kind {
-        let level = roomLevels[kind: kind]
-        if st.room?.kind != kind { log(String(format: "%@ room%@: red shift %.0f%%", kind, lux.map { String(format: " (%.0f lux)", $0) } ?? "", level * 100)) }
-        st.room = Room(lux: lux ?? st.room?.lux ?? -1, target: level, darkness: level, at: now, kind: kind)
-        roomKindNow = kind; roomLevel = level; roomActive = true
+        roomKindNow = kind; roomActive = true; roomLevel = roomRed(now)
+        if kind != was { log(String(format: "%@ room%@: red shift %.0f%%", kind, lux.map { String(format: " (%.0f lux)", $0) } ?? "", roomLevel * 100)) }
+        st.room = Room(lux: lux ?? st.room?.lux ?? -1, target: roomLevel, darkness: roomLevel, at: now, kind: kind)
     } else { st.room = nil; roomKindNow = nil; roomActive = false }
-    // The keys only when the room changed: without the app this runs every minute, and put back each minute the
-    // level you had set with the brightness keys. (The app sends those as `set keyboard`, which the room remembers.)
-    return roomOutOfDate(keys: kind != was)
+    return roomOutOfDate()
 }
-/// The red or the keys aren't what this room calls for.
-func roomOutOfDate(keys: Bool = true) -> Bool {
+/// The red or the keys aren't what this room, at this time of night, calls for.
+func roomOutOfDate() -> Bool {
     let sh = loadShade()
     if abs(lifted(sh.base ?? sh.warmth ?? 0) - (sh.warmth ?? 0)) > 0.003 { return true }
     var probe = Settings(); probe.keyboardBrightness = 0
-    if keys, let k = roomKeyboard(for: probe), let now = loadCommanded().keyboardBrightness, abs(kbTicksOf(k) - kbTicksOf(now)) > 0.5 { return true }
+    if let k = roomKeyboard(for: probe), let now = loadCommanded().keyboardBrightness, abs(kbTicksOf(k) - kbTicksOf(now)) > 0.5 { return true }
     return false
 }
-/// Redraws the chosen warmth for the room, eased: 10 s for the smallest change, a further 6 s for every 10 % of Red
-/// Shift, 40 s at most. The tint leg can switch across 60 %, which is not a change of yours.
-func reliftWarmth(_ st: inout State, eased: Bool = true) {
+/// Redraws the look for the room, eased: 15 s for the smallest change, up to 90 s for a lamp going off late at night, so
+/// even the biggest move is too slow to catch and a two-minute trip to a lit room is a soft dip. The tint leg can switch
+/// across 60 %, which is not a change of yours.
+func reliftWarmth(_ st: inout State, ease forced: Double? = nil) {
     let sh = loadShade(), base = sh.base ?? sh.warmth ?? 0
     let delta = abs(lifted(base) - (sh.warmth ?? 0))
     var s = Settings(); s.warmth = base
-    // The keys too, when the room sets them; the app fades them (slowly, since nobody is touching the slider).
-    if let k = roomKeyboard(for: s) { s.keyboardBrightness = k; s.keyboardAutoBrightness = false }
-    apply(s, label: "ROOM", quiet: true, ease: eased ? min(40, 10 + 60 * delta) : 0)
+    // The keys too, when the room sets them and they need to move; macOS and the app fade them.
+    if let k = roomKeyboard(for: s), abs(kbTicksOf(k) - kbTicksOf(loadCommanded().keyboardBrightness ?? -1)) > 0.5 { s.keyboardBrightness = k; s.keyboardAutoBrightness = false }
+    apply(s, label: "ROOM", quiet: true, ease: forced ?? min(90, 15 + 150 * delta))
     // Neither is a change of yours: the filter can switch across 60 %, and the keys are the room's.
     let cur = readCurrent()
     st.lastSeen?.filterEnabled = cur.filterEnabled
     if s.keyboardBrightness != nil { st.lastSeen?.keyboardBrightness = cur.keyboardBrightness; st.lastSeen?.keyboardAutoBrightness = false }
+    if st.room != nil { st.room?.target = roomLevel; st.room?.darkness = roomLevel }
 }
 
 // MARK: - Main
@@ -895,7 +977,7 @@ let cmd = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "check"
 // read-modify-write state.json, shade.json and config.json; two overlapping runs would snapshot each other's
 // half-applied look as "your day settings" and log it as a manual change, and a check that loaded state just before
 // `off` would save "on" back over it and step its fade onto a screen that was just cleared.
-if !["status", "suntimes", "learned", "curve"].contains(cmd) {
+if !["status", "suntimes", "learned", "curve", "forecast"].contains(cmd) {
     let fd = open(appDir.appendingPathComponent(".lock").path, O_CREAT | O_RDWR, 0o644)
     var waited = 0                                          // released when the process exits; bounded (10 s) so a
     while fd >= 0 && flock(fd, LOCK_EX | LOCK_NB) != 0 && waited < 500 { usleep(20_000); waited += 1 }   // hung run can't wedge the rest
@@ -936,7 +1018,10 @@ case "check":
     if (try? enc.encode(newLearned)) != (try? enc.encode(learned)) { saveLearned(newLearned); learned = newLearned }
     // Before any fade step, which then draws for the room as it is. The app senses the room while it runs (`room
     // <lux>`); this only does it without the app.
-    let roomMoved = runningApp() ? false : senseRoom(&st, now: now)
+    // With the app, each minute only follows the curve. Without it the brightness keys aren't reported: what they set holds.
+    let appUp = runningApp()
+    if !appUp, changes.contains("keyboardBrightness"), roomActive, roomNightness >= 0.999, let b = st.lastSeen?.keyboardBrightness { st.holdKeys = b; roomHoldKeys = b }
+    let roomMoved = appUp ? roomOutOfDate() : senseRoom(&st, now: now)
     settleTint()
     var redrawn = false
     var want = isNight(cfg: cfg, learned: learned, now: now) ? "night" : "day"
@@ -961,7 +1046,7 @@ case "check":
             stepRamp(&st, now: now); redrawn = true
         }
     }
-    if roomMoved && !redrawn { reliftWarmth(&st, eased: false) }
+    if roomMoved && !redrawn { reliftWarmth(&st) }
     saveState(st)
 case "room":
     // `room <lux>`: the app's filtered reading, after the room's light has settled at a new level. `room none`: no
@@ -969,14 +1054,39 @@ case "room":
     var st = loadState() ?? blank()
     if st.disabled == true || (st.pausedUntil.map { now < $0 } ?? false) { exit(0) }
     holdTint = st.heldFor != nil
-    // `room dark|dim|lit [lux]`: the app's settled reading. `room none`: no reading. `room <lux>` or `room`: classify here.
+    // `room dark|dim|lit [lux [now]]`: the app's settled reading (`now`: the lid just opened, so no need to be slow).
+    // `room none`: no reading. `room <lux>` or `room`: classify here.
     let arg = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : nil
     let luxArg = CommandLine.arguments.count > 3 ? Double(CommandLine.arguments[3]) : arg.flatMap(Double.init)
     let kindArg = ["dark", "dim", "lit"].contains(arg ?? "") ? arg : nil
     let moved = arg == "none" ? { st.room = nil; roomKindNow = nil; roomActive = false; return roomOutOfDate() }()
                               : senseRoom(&st, now: now, kind: kindArg, lux: luxArg)
-    if moved { reliftWarmth(&st) }
+    if moved { reliftWarmth(&st, ease: CommandLine.arguments.count > 4 ? 3 : nil) }
     saveState(st)
+case "auto":
+    // Back to what the night and the room call for.
+    var st = loadState() ?? blank()
+    if st.disabled == true || (st.pausedUntil.map { now < $0 } ?? false) { exit(0) }
+    holdTint = st.heldFor != nil
+    clearNight(&st)
+    var sh = loadShade()                            // a look held at off leaves no warmth for the room's level to show through
+    if (sh.base ?? 0) <= 0.001, st.mode == "night" { sh.base = nightPreset(cfg: cfg, learned: learned).warmth; saveShade(sh) }
+    if roomOutOfDate() { reliftWarmth(&st) }
+    saveState(st)
+case "forecast":
+    // The night ahead for the Settings chart: the red by kind of room, from sunset to sunrise, on the night clock.
+    let st = loadState()
+    let (rise, set) = sunTimes(cfg: cfg, learned: learned, near: now)
+    let from = set < rise ? set : set.addingTimeInterval(-86400), to = rise > from ? rise : rise.addingTimeInterval(86400)
+    var rooms: [String: [[Double]]] = [:]
+    for kind in ["dark", "dim", "lit"] {
+        rooms[kind] = stride(from: from.timeIntervalSince1970, through: to.timeIntervalSince1970, by: 900).map { t in
+            let d = Date(timeIntervalSince1970: t); return [t, predictRed(kind, at: d)]
+        }
+    }
+    let out: [String: Any] = ["from": from.timeIntervalSince1970, "to": to.timeIntervalSince1970, "now": now.timeIntervalSince1970,
+                              "room": st?.room?.kind ?? "", "rooms": rooms, "lessons": roomChoices.count]
+    if let d = try? JSONSerialization.data(withJSONObject: out), let t = String(data: d, encoding: .utf8) { print(t) }
 case "night", "day":
     var st = loadState()
     st?.pausedUntil = nil
@@ -1076,12 +1186,13 @@ case "set":
     switch field {
     case "warmth":
         let x = off ? 0 : max(0, min(1, num / 100))
-        if roomActive && roomNightness > 0 {
-            // At night in a known kind of room the slider sets that room's level; the schedule's own warmth stays.
-            rememberRoomLevel(x); let sh = loadShade(); s.warmth = max(0.01, sh.base ?? sh.warmth ?? 0.01)
+        if roomActive && roomNightness > 0, var st = loadState() {
+            // At night in a known kind of room the slider teaches the curve; the schedule's own warmth stays.
+            chooseRed(&st, x, now: now); saveState(st)
+            let sh = loadShade(); s.warmth = max(0.01, sh.base ?? sh.warmth ?? 0.01)
         } else { s.warmth = x }
     case "keyboard": s.keyboardAutoBrightness = false; s.keyboardBrightness = off ? 0 : max(0, min(1, num / 100))
-        if let b = s.keyboardBrightness { rememberRoomKey(b) }       // at night in a known kind of room: that room's keys
+        if let b = s.keyboardBrightness, var st = loadState() { chooseKeys(&st, b, now: now); saveState(st) }
     case "idle":
         guard !off, num >= 1 else { print("idle needs a number of seconds (1 or more)"); exit(2) }
         s.keyboardIdleDimSeconds = num
@@ -1111,8 +1222,12 @@ case "preset":
         if s.warmth == nil { s.warmth = 0 }
         if s.keyboardBrightness != nil { s.keyboardAutoBrightness = false }
         // At night in a known kind of room, the preset's Red Shift becomes that room's level, like the slider.
-        if roomActive && roomNightness > 0, let w = s.warmth { rememberRoomLevel(w); if w > 0.001 { s.warmth = max(w, 0.01) } }
-        if let b = s.keyboardBrightness { rememberRoomKey(b) }
+        // A preset is for now: it holds until the room changes and teaches the curve nothing.
+        if roomActive && roomNightness > 0, var st = loadState() {
+            st.holdRed = max(0, min(1, (s.warmth ?? 0) / roomNightness)); roomHoldRed = st.holdRed; roomLevel = roomRed(now)
+            if roomNightness >= 0.999, let b = s.keyboardBrightness { st.holdKeys = b; roomHoldKeys = b }
+            saveState(st)
+        }
         apply(s, label: "PRESET \(p.name)")
     case "save":
         guard !name.isEmpty else { print("usage: redlight preset save <name> [sf-symbol]"); exit(2) }
@@ -1209,9 +1324,10 @@ case "learned":
 case "forget":
     try? FileManager.default.removeItem(at: learnedURL)
     try? FileManager.default.removeItem(at: eventsURL)
+    try? FileManager.default.removeItem(at: choicesURL)
     log("forgot all learned adjustments and observations")
 case "curve":
     for w in stride(from: 0.0, through: 1.0, by: 0.1) { let c = warmthCurve(w); print(String(format: "warmth %3.0f%%  blue %.2f  green %.2f  tint %.2f", w * 100, c.blue, c.green, c.tint)) }
 default:
-    print("usage: redlight on|off|check|night|day|pause|resume|hold|release|location|set|preset|shade|reapply|room|status|suntimes|learned|forget|curve"); exit(2)
+    print("usage: redlight on|off|check|night|day|pause|resume|hold|release|location|set|preset|shade|reapply|room|auto|forecast|status|suntimes|learned|forget|curve"); exit(2)
 }

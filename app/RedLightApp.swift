@@ -30,11 +30,10 @@ struct Shortcuts: Codable {
 struct Preset: Codable, Identifiable { var name: String; var icon: String; var settings: Settings; var id: String { name } }
 /// True colour for colour-critical apps: ask, or remember per app (bundle identifiers).
 struct TrueColor: Codable { var ask = true; var always: [String] = []; var never: [String] = [] }
-/// Let the room's light set Red Shift at night: the level you last chose in each kind of room (the engine's `roomKind`).
-struct RoomLight: Codable { var enabled = true; var levels = RoomLevels(); var keyboard = RoomKeys() }
-/// The keyboard backlight per kind of room (the engine's `RoomKeys`): Extra Dim 1 dark, Extra Dim 4 dim, 1 % lit.
-struct RoomKeys: Codable { var dark = 2.0 / 54 * 0.001; var dim = 21.0 / 54 * 0.001; var lit = 0.001 }
-struct RoomLevels: Codable { var dark = 0.45; var dim = 0.25; var lit = 0.0 }
+/// Let the room's light, with the time of night, set Red Shift and the keys (the engine's "Your night").
+struct RoomLight: Codable { var enabled = true }
+/// The night ahead for the Settings chart (`redlight forecast`): the red by kind of room, `[time, level]` every 15 minutes.
+struct Forecast: Decodable { var from: Double; var to: Double; var now: Double; var room: String; var rooms: [String: [[Double]]]; var lessons: Int }
 struct Config: Codable {
     var latitude: Double; var longitude: Double; var locationSource: String?; var fadeMinutes: Double?
     var night: Settings; var dayDefaults: Settings
@@ -64,24 +63,6 @@ extension RoomLight {
     init(from d: Decoder) throws {
         self.init(); guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }
         enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? enabled
-        levels = (try? c.decodeIfPresent(RoomLevels.self, forKey: .levels)) ?? levels
-        keyboard = (try? c.decodeIfPresent(RoomKeys.self, forKey: .keyboard)) ?? keyboard
-    }
-}
-extension RoomKeys {
-    init(from d: Decoder) throws {
-        self.init(); guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }
-        dark = (try? c.decodeIfPresent(Double.self, forKey: .dark)) ?? dark
-        dim = (try? c.decodeIfPresent(Double.self, forKey: .dim)) ?? dim
-        lit = (try? c.decodeIfPresent(Double.self, forKey: .lit)) ?? lit
-    }
-}
-extension RoomLevels {
-    init(from d: Decoder) throws {
-        self.init(); guard let c = try? d.container(keyedBy: CodingKeys.self) else { return }
-        dark = (try? c.decodeIfPresent(Double.self, forKey: .dark)) ?? dark
-        dim = (try? c.decodeIfPresent(Double.self, forKey: .dim)) ?? dim
-        lit = (try? c.decodeIfPresent(Double.self, forKey: .lit)) ?? lit
     }
 }
 extension TrueColor {
@@ -95,8 +76,8 @@ extension TrueColor {
 struct Ramp: Codable { var start: Date; var seconds: Double; var from: Settings; var to: Settings; var label: String }
 /// Written only by the engine. `disabled` is the master switch; `heldFor` names the app holding true colour.
 struct ModeState: Codable { var mode: String; var daySnapshot: Settings?; var lastSeen: Settings?; var lastNotified: Date?; var ramp: Ramp?; var pausedUntil: Date?
-    var disabled: Bool?; var heldFor: String?; var room: Room? }
-/// The room as the engine last set it: its `kind` (dark, dim or lit) and that kind's level; `lux` is -1 with no reading.
+    var disabled: Bool?; var heldFor: String?; var room: Room?; var holdRed: Double?; var holdKeys: Double? }
+/// The room as the engine last set it: its `kind` (dark, dim or lit) and the level it gave it; `lux` is -1 with no reading.
 struct Room: Codable { var lux: Double; var target: Double; var darkness: Double; var at: Date; var kind: String? }
 struct Learned: Codable {
     var sunsetOffsetMinutes = 0.0; var sunriseOffsetMinutes = 0.0
@@ -1162,12 +1143,13 @@ final class Model: ObservableObject {
     /// light coming back, swinging between 0 and 5 lux as the page changes, so a level that tracked lux swung with it.
     /// The reading is filtered the way True Tone and auto-brightness filter theirs: every half second, kept as a quick
     /// (2 s) and a slow (8 s) average; a new kind only when both are past its margin (the same as the engine's
-    /// `roomKind`: wide, so only a lamp going on or off crosses one), and have stayed past it for 5 s (brighter) or
-    /// 12 s (darker). Then `room <kind> <lux>` sets that kind's level, drawn over 10–40 s (see drawLook); while it plays
-    /// out, and for 5 s after, the screen's own changing light can't start another.
+    /// `roomKind`: wide, so only a lamp going on or off crosses one), and have stayed past it for 8 s (brighter) or
+    /// 15 s (darker). Then `room <kind> <lux>` sets it, drawn over 15–90 s (see drawLook); while it plays out, and for
+    /// 5 s after, the screen's own changing light can't start another. Opening the lid is different: you may be in another
+    /// room, and nobody is watching yet, so two settled seconds of readings decide, at once (`now`).
     private let roomSensor = RoomSensor()
     private var roomInFlight = false
-    private var luxFast: Double?, luxSlow: Double?
+    private var luxFast: Double?, luxSlow: Double?, luxSamples = 0
     private var roomPending: String?, roomPendingSince = Date.distantPast, roomQuietUntil = Date.distantPast
     static func roomKind(lux: Double, was: String?) -> String {
         switch was {
@@ -1178,29 +1160,38 @@ final class Model: ObservableObject {
         }
     }
     /// Just after the lid opens the sensor reads low (3 lux in a 17 lux room): start the averages once it has settled.
-    private var roomSettleUntil = Date.distantPast
-    func settleRoom() { roomSettleUntil = Date().addingTimeInterval(4); luxFast = nil; luxSlow = nil; roomPending = nil }
+    private var roomSettleUntil = Date.distantPast, roomFresh = true
+    func settleRoom() { roomSettleUntil = Date().addingTimeInterval(2.5); resetLux(); roomFresh = true; roomQuietUntil = .distantPast }
+    private func resetLux() { luxFast = nil; luxSlow = nil; luxSamples = 0; roomPending = nil }
     func watchRoom() {
         guard Date() >= roomSettleUntil else { return }
         guard !roomInFlight, !isOff, !isPaused, config.roomLight?.enabled ?? true,
-              isNight || isFading || (shade.warmth ?? 0) > 0.001 else { luxFast = nil; luxSlow = nil; roomPending = nil; return }
+              isNight || isFading || (shade.warmth ?? 0) > 0.001 else { resetLux(); return }
         let was = state?.room?.kind
         guard let lux = roomSensor.lux() else {
-            luxFast = nil; luxSlow = nil; roomPending = nil
+            resetLux()
             if was != nil { sendRoom(["none"]) }                     // lid closed: back to the schedule's own level
             return
         }
+        // log(lux + 3): equal steps for equal ratios, with the dark end's sensor noise (2 lux against 3) damped
         let x = log10(lux + 3)
         luxFast = luxFast.map { $0 + (x - $0) * (1 - exp(-0.5 / 2)) } ?? x
         luxSlow = luxSlow.map { $0 + (x - $0) * (1 - exp(-0.5 / 8)) } ?? x
+        luxSamples += 1
         let fast = pow(10, luxFast!) - 3, slow = pow(10, luxSlow!) - 3
-        guard let current = was else { sendRoom([Self.roomKind(lux: lux, was: nil), String(format: "%.1f", lux)]); return }
-        guard Date() >= roomQuietUntil else { roomPending = nil; return }
+        if roomFresh || was == nil {
+            guard luxSamples >= 4 else { return }
+            roomFresh = false
+            let k = Self.roomKind(lux: slow, was: nil)
+            if k != was { sendRoom([k, String(format: "%.1f", slow), "now"]) }
+            return
+        }
+        guard let current = was, Date() >= roomQuietUntil else { roomPending = nil; return }
         let a = Self.roomKind(lux: fast, was: current), b = Self.roomKind(lux: slow, was: current)
         guard a == b, a != current else { roomPending = nil; return }
         if roomPending != a { roomPending = a; roomPendingSince = Date(); return }
         let order = ["dark", "dim", "lit"], brighter = order.firstIndex(of: a)! > order.firstIndex(of: current)!
-        guard Date().timeIntervalSince(roomPendingSince) >= (brighter ? 5 : 12) else { return }
+        guard Date().timeIntervalSince(roomPendingSince) >= (brighter ? 8 : 15) else { return }
         roomPending = nil
         sendRoom([a, String(format: "%.1f", slow)])
     }
@@ -1304,8 +1295,20 @@ final class Model: ObservableObject {
         easeTimer?.invalidate(); easeTimer = nil; tintDrawn = nil
     }
     var isNight: Bool { state?.mode == "night" }
-    /// The kind of room the red is set for now, while Match Room Light has one.
+    /// The kind of room the look is set for now, while Match Room Light has one.
     var roomKindNow: String? { (config.roomLight?.enabled ?? true) ? state?.room?.kind : nil }
+    /// Whether the room and the hour are choosing, rather than a look held for now.
+    var nightIsAuto: Bool { isNight && roomKindNow != nil && !isOff && !isPaused && heldFor == nil }
+    var redIsAuto: Bool { nightIsAuto && state?.holdRed == nil }
+    var keysAreAuto: Bool { nightIsAuto && state?.holdKeys == nil && live.keyboardAutoBrightness != true }
+    func backToAuto() { runCLI(["auto"]) }
+    @Published var forecast: Forecast?
+    func loadForecast() {
+        liveQueue.async { [weak self] in
+            let f = try? JSONDecoder().decode(Forecast.self, from: Data(cli("forecast").utf8))
+            DispatchQueue.main.async { self?.forecast = f }
+        }
+    }
     var isPaused: Bool { if let u = state?.pausedUntil { return u > Date() }; return false }
     var isFading: Bool { state?.ramp != nil }
     var sunriseText: String { switchTime(0) }
@@ -1323,9 +1326,8 @@ final class Model: ObservableObject {
     private var configsInFlight = 0
     func saveConfig(reapply: Bool = true) {
         func obj(_ d: Data?) -> [String: Any]? { d.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } }
-        // Key by key inside objects too: the engine writes inside one (`set` and presets remember `roomLight.levels` and
-        // `roomLight.keyboard`), and Match Room Light writing all of `roomLight` from this model's copy put back the
-        // levels from before a `set` still queued ahead of it (a brightness key pressed with Settings open).
+        // Key by key inside objects too: a block written whole from this model's copy puts back whatever the engine wrote
+        // inside it since this model last read the file.
         func merge(_ disk: inout [String: Any], _ was: [String: Any], _ mine: [String: Any]) {
             for k in Set(was.keys).union(mine.keys) where !NSArray(array: [was[k] ?? NSNull()]).isEqual(to: [mine[k] ?? NSNull()]) {
                 if let w = was[k] as? [String: Any], let m = mine[k] as? [String: Any], var d = disk[k] as? [String: Any] { merge(&d, w, m); disk[k] = d }
@@ -1806,6 +1808,52 @@ struct TextRow: View {
         }
     }
 }
+/// The night ahead: how deep the red goes, sunset to sunrise, in a dark room and (fainter) a dim one, with a dot at now.
+struct NightChart: View {
+    let f: Forecast
+    private let red = Color(red: 1, green: 0.26, blue: 0.2)
+    private func x(_ t: Double, _ w: CGFloat) -> CGFloat { CGFloat((t - f.from) / max(1, f.to - f.from)) * w }
+    private func y(_ v: Double, _ h: CGFloat) -> CGFloat { h - CGFloat(v) * (h - 2) - 1 }
+    private func line(_ pts: [[Double]], _ w: CGFloat, _ h: CGFloat) -> Path {
+        var p = Path()
+        for (i, q) in pts.enumerated() { let pt = CGPoint(x: x(q[0], w), y: y(q[1], h)); if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) } }
+        return p
+    }
+    private var ticks: [(Double, String)] {
+        let fmt = DateFormatter(); fmt.dateFormat = "h a"
+        var d = Calendar.current.dateInterval(of: .hour, for: Date(timeIntervalSince1970: f.from))!.end, out: [(Double, String)] = []
+        while d.timeIntervalSince1970 < f.to {
+            if Calendar.current.component(.hour, from: d) % 3 == 0 { out.append((d.timeIntervalSince1970, fmt.string(from: d))) }
+            d = d.addingTimeInterval(3600)
+        }
+        return out
+    }
+    var body: some View {
+        let dark = f.rooms["dark"] ?? [], dim = f.rooms["dim"] ?? []
+        let here = f.rooms[f.room] ?? dark
+        let now = here.min { abs($0[0] - f.now) < abs($1[0] - f.now) }
+        VStack(spacing: 4) {
+            GeometryReader { g in
+                let w = g.size.width, h = g.size.height
+                ZStack(alignment: .topLeading) {
+                    var fill = line(dark, w, h)
+                    let end = x(dark.last?[0] ?? f.to, w)
+                    let _ = (fill.addLine(to: CGPoint(x: end, y: h)), fill.addLine(to: CGPoint(x: 0, y: h)), fill.closeSubpath())
+                    fill.fill(LinearGradient(colors: [red.opacity(0.28), red.opacity(0.02)], startPoint: .top, endPoint: .bottom))
+                    line(dim, w, h).stroke(red.opacity(0.4), style: StrokeStyle(lineWidth: 1, lineCap: .round))
+                    line(dark, w, h).stroke(red, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                    if let n = now, f.now >= f.from, f.now <= f.to {
+                        Circle().fill(Color.white).frame(width: 7, height: 7).shadow(color: .black.opacity(0.35), radius: 1)
+                            .position(x: x(n[0], w), y: y(n[1], h))
+                    }
+                }
+            }.frame(height: 56)
+            GeometryReader { g in
+                ForEach(ticks, id: \.0) { t in Text(t.1).font(.system(size: 10)).foregroundStyle(CC.secondary).fixedSize().position(x: x(t.0, g.size.width), y: 6) }
+            }.frame(height: 12)
+        }
+    }
+}
 struct SettingsRow: View {
     let text: String
     var body: some View { HStack { Text(text).font(CC.small).foregroundStyle(CC.label); Spacer() }.frame(height: 30).padding(.bottom, 1.5).contentShape(Rectangle()) }
@@ -1895,7 +1943,7 @@ struct Panel: View {
 
     @ViewBuilder var controls: some View {
         VStack(spacing: 0) {
-            Header(text: "Red Shift", value: (m.live.warmth ?? 0) > 0.001 ? fmtPct(m.live.warmth) : "Off")
+            Header(text: "Red Shift", value: (m.redIsAuto ? "Auto · " : "") + ((m.live.warmth ?? 0) > 0.001 ? fmtPct(m.live.warmth) : "Off"))
             SliderRow(minIcon: "sun.max", maxIcon: "moon.fill", steps: warmSteps, current: m.live.warmth, isOn: (m.live.warmth ?? 0) > 0.001) { s, final in
                 m.setWarmth(s.value ?? 0, final: final) }
             SectionEnd()
@@ -1905,7 +1953,7 @@ struct Panel: View {
                 if let v = s.value { m.setShade(enabled: true, level: v) } else { m.setShade(enabled: false) } }
             SectionEnd()
 
-            Header(text: "Keyboard Backlight", value: fmtKeyboard(m.live.keyboardBrightness))
+            Header(text: "Keyboard Backlight", value: (m.keysAreAuto ? "Auto · " : "") + fmtKeyboard(m.live.keyboardBrightness))
             KeyboardSlider(current: m.live.keyboardBrightness) { t, final in m.setKeyboard(ticks: t, final: final) }
             Header(text: "Turn Off After Inactivity", value: fmtSeconds(m.live.keyboardIdleDimSeconds))
             SliderRow(minIcon: "timer", maxIcon: "clock", steps: idleSteps, current: m.live.keyboardIdleDimSeconds, isOn: true) { s, final in
@@ -1914,6 +1962,7 @@ struct Panel: View {
 
             Header(text: "Presets")
             let list = m.config.presets ?? []
+            if m.nightIsAuto { IconRow(icon: "moon.stars.fill", label: "Auto", active: m.redIsAuto && m.keysAreAuto).onTapGesture { m.backToAuto() } }
             if list.isEmpty { TextRow(text: "No presets yet", secondary: true) }
             ForEach(list) { p in
                 IconRow(icon: p.icon, label: p.name, trailing: m.nightPresetName == p.name ? "At sunset" : nil, active: isCurrent(p))
@@ -1960,6 +2009,7 @@ struct Panel: View {
     /// applied (only warmth defaults, to 0), so a missing one matches whatever is there rather than counting as off.
     func isCurrent(_ p: Preset) -> Bool {
         let s = p.settings
+        if m.nightIsAuto && m.state?.holdRed == nil { return false }        // the night is choosing, whatever it happens to match
         let kbOK = s.keyboardBrightness.map { abs(kbTicks($0) - kbTicks(m.live.keyboardBrightness)) < 1 } ?? true
         let shadeOK = (s.shadeEnabled ?? m.shade.enabled) == m.shade.enabled
             && (!m.shade.enabled || s.shadeLevel.map { abs($0 - m.shade.level) < 0.02 } ?? true)
@@ -2049,12 +2099,15 @@ struct SettingsPage: View {
                 }.labelsHidden().controlSize(.small).frame(width: 96)
             }.frame(height: 32)
             TextRow(text: m.nightPresetName.map { "Sunset eases into “\($0)”" } ?? "Sunset eases into a custom mix", secondary: true)
+            Line()
+
+            Header(text: "Your Night")
+            if let f = m.forecast { NightChart(f: f).padding(.vertical, 6) }
             ToggleRow(label: "Match Room Light", isOn: Binding(get: { m.config.roomLight?.enabled ?? true }, set: {
                 var r = m.config.roomLight ?? RoomLight(); r.enabled = $0; m.config.roomLight = r
                 m.saveConfig(reapply: false); m.runCLI(["room"])           // queued behind the save: on eases to the room, off draws your level
             }), drawn: m.snapshotMode)
-            TextRow(text: roomLevelsText, secondary: true)
-            TextRow(text: roomKeysText, secondary: true)
+            TextRow(text: "Red Shift and the keyboard follow the hour and the room's light, and every adjustment you make teaches them. Presets are just for now.", secondary: true)
             Line()
 
             Header(text: "Learning")
@@ -2089,19 +2142,8 @@ struct SettingsPage: View {
             SettingsRow(text: "Quit Red Light").onTapGesture { NSApp.terminate(nil) }
         }
         .padding(.horizontal, CC.side)
-        .onAppear { lat = String(m.config.latitude); lon = String(m.config.longitude) }
+        .onAppear { lat = String(m.config.latitude); lon = String(m.config.longitude); m.loadForecast() }
         .onDisappear { m.stopRecording() }
-    }
-    /// The level each kind of room has: what you last chose there, at night.
-    var roomLevelsText: String {
-        let l = (m.config.roomLight ?? RoomLight()).levels
-        func f(_ v: Double) -> String { v > 0.001 ? "\(Int((v * 100).rounded()))%" : "off" }
-        return "Remembers your Red Shift for each kind of room: dark \(f(l.dark)), dim \(f(l.dim)), lit \(f(l.lit))"
-    }
-    var roomKeysText: String {
-        let k = (m.config.roomLight ?? RoomLight()).keyboard
-        func f(_ v: Double) -> String { let s = fmtKeyboard(v); return s == "Off" ? "off" : s }     // mid-sentence, as above
-        return "And your keyboard backlight: dark \(f(k.dark)), dim \(f(k.dim)), lit \(f(k.lit))"
     }
     var locationLabel: String {
         let c = String(format: "%.2f, %.2f", m.config.latitude, m.config.longitude)
