@@ -52,7 +52,8 @@ struct Settings: Codable {
 /// `easeAt` (seconds since 1970) — the app animates it, the tint leg too when `tintDeferred` (see `apply`).
 struct Shade: Codable { var enabled: Bool = false; var level: Double = 0.3; var warmth: Double? = 0; var gammaBlue: Double? = 1; var gammaGreen: Double? = 1; var base: Double?
     var ease: Double?; var easeAt: Double?; var tintDeferred: Bool? }
-struct Commanded: Codable { var keyboardBrightness: Double? }
+/// `fadeUntil`: macOS is fading the keys to this level until then, so the hardware still shows the old one.
+struct Commanded: Codable { var keyboardBrightness: Double?; var fadeUntil: Date? }
 /// macOS's lowest keyboard level is 0.001, which drives the backlight's PWM at 54 of 960 ticks; every value up to about
 /// 0.008 is that same level. The hardware goes down to 1 tick, and the menu bar app holds it there: a value between 0
 /// and 0.001 means "this fraction of macOS's minimum", so the four extra-dim levels, 2, 4, 9 and 21 ticks, are
@@ -270,7 +271,9 @@ func readCurrent() -> Settings {
             let known = loadCommanded().keyboardBrightness
             // An extra-dim level is the app's to hold, and on the way there the keys still show the old level: the
             // record stands. (The brightness keys during a hold are reported by the app itself.)
-            if isExtraDim(known) { s.keyboardBrightness = known }
+            // So does a level macOS is still fading to: read back mid-fade, the old level was saved over the new one.
+            let fading = loadCommanded().fadeUntil.map { Date() < $0 } ?? false
+            if isExtraDim(known) || fading { s.keyboardBrightness = known }
             else {
                 s.keyboardBrightness = v
                 if known == nil || abs(known! - v) > 0.0005 { saveCommanded(Commanded(keyboardBrightness: v)) }
@@ -331,7 +334,7 @@ func apply(_ s: Settings, label: String, quiet: Bool = false, ease: Double = 0) 
         // A gradual change (the room, a fade step) fades the keys over 2 s, as gently as the red; anything else at once.
         if let b = s.keyboardBrightness {
             if !isExtraDim(b) && !(b > 0 && appIdleKeys()) { if ease > 0 { kbFadeBrightness(Float(b), 2000, id) } else { kbSetBrightness(Float(b), id) } }
-            saveCommanded(Commanded(keyboardBrightness: b))
+            saveCommanded(Commanded(keyboardBrightness: b, fadeUntil: ease > 0 && !isExtraDim(b) ? Date().addingTimeInterval(3) : nil))
         }
     }
     if !quiet { log("applied \(label): \(describe(s))" + (s.warmth.map { abs(lifted($0) - $0) > 0.005 ? String(format: " (dark room: shown at %.2f)", lifted($0)) : "" } ?? "")) }

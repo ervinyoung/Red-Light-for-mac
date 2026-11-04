@@ -883,6 +883,9 @@ final class KeyboardHold {
     private var backlight: io_service_t = 0
     // q only
     private var want = Want.none, idle = 5.0, asleep = false, lit = true, suspended = false
+    /// Waking puts macOS's own saved level back on the keys (4.7 % here), which looks just like the brightness keys: taken
+    /// for them, it was saved as the room's level and the keys stayed bright all night. Until this time, nothing is.
+    private var overrideQuietUntil = Date.distantPast
     private var up = false, fastDown = false, lastKeep = Date.distantPast, lastCheck = Date.distantPast
     private var lastTick = -1, lastMove = Date.distantPast       // a requested fade that isn't moving gets asked again
     /// The brightness keys or Control Center set a new level: it becomes the level.
@@ -906,7 +909,7 @@ final class KeyboardHold {
             nc.addObserver(forName: n, object: nil, queue: nil) { [weak self] _ in self?.q.async { self?.asleep = true; self?.schedule() } } }
         for n in [NSWorkspace.screensDidWakeNotification, NSWorkspace.didWakeNotification] {
             nc.addObserver(forName: n, object: nil, queue: nil) { [weak self] _ in self?.q.async { guard let k = self else { return }
-                k.asleep = false; k.lit = false
+                k.asleep = false; k.lit = false; k.overrideQuietUntil = Date().addingTimeInterval(8)
                 switch k.want { case .level, .hold: k.markIdle(true); default: break }     // dark until a touch: say so, as for idle-off
                 k.schedule() } } }
     }
@@ -989,6 +992,7 @@ final class KeyboardHold {
         if !lit {                                                       // off after inactivity: wait for a touch
             if idleTime() < 0.5 || idle <= 0 || idleTime() + 0.5 < idle {     // a touch, or the idle time raised past how long you've been away
                 lit = true; up = false; fastDown = false; lastMove = now; markIdle(false)
+                overrideQuietUntil = now.addingTimeInterval(5)
                 if case .level(let v) = want { send(Float(v), 250) }
                 schedule()
             } else if t > 0 && stalled { send(0, 500); lastMove = now }    // something lit them meanwhile
@@ -1001,7 +1005,8 @@ final class KeyboardHold {
             let v = Double(g(c, getSel, id))
             var ours: Double = 0
             if case .level(let l) = want { ours = l }
-            if v > 0.0015, abs(v - ours) > 0.002, Float(v) != lastValue {
+            // A level nobody reached for isn't the brightness keys: they, and Control Center's slider, are input.
+            if v > 0.0015, abs(v - ours) > 0.002, Float(v) != lastValue, now >= overrideQuietUntil, idleTime() < 3 {
                 // Unless auto-brightness has just come on (System Settings, or the engine handing the keys back at a pause
                 // or sunrise before the pane has heard): that level is macOS's. Recorded, it would `set keyboard`, which
                 // switches auto-brightness straight back off. Give the keys back; the next refresh says .none too.
@@ -1085,7 +1090,7 @@ final class Model: ObservableObject {
         let nc = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification, NSWorkspace.sessionDidBecomeActiveNotification] {
             nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                self?.runCLI(["check"]); self?.locateIfAuto()
+                self?.runCLI(["check"]); self?.locateIfAuto(); self?.settleRoom()
             }
         }
         NotificationCenter.default.addObserver(forName: .NSSystemTimeZoneDidChange, object: nil, queue: .main) { [weak self] _ in self?.locateIfAuto() }
@@ -1172,7 +1177,11 @@ final class Model: ObservableObject {
         default:     return lux < 5 ? "dark" : lux < 20 ? "dim" : "lit"
         }
     }
+    /// Just after the lid opens the sensor reads low (3 lux in a 17 lux room): start the averages once it has settled.
+    private var roomSettleUntil = Date.distantPast
+    func settleRoom() { roomSettleUntil = Date().addingTimeInterval(4); luxFast = nil; luxSlow = nil; roomPending = nil }
     func watchRoom() {
+        guard Date() >= roomSettleUntil else { return }
         guard !roomInFlight, !isOff, !isPaused, config.roomLight?.enabled ?? true,
               isNight || isFading || (shade.warmth ?? 0) > 0.001 else { luxFast = nil; luxSlow = nil; roomPending = nil; return }
         let was = state?.room?.kind
