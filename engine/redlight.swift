@@ -1100,7 +1100,7 @@ case "forecast":
         }
     }
     let out: [String: Any] = ["from": from.timeIntervalSince1970, "to": to.timeIntervalSince1970, "now": now.timeIntervalSince1970,
-                              "room": st?.room?.kind ?? "", "rooms": rooms, "lessons": roomChoices.count]
+                              "room": st?.room?.kind ?? "", "rooms": rooms, "lessons": loadChoices().count]   // with learning off too: they can still be forgotten
     if let d = try? JSONSerialization.data(withJSONObject: out), let t = String(data: d, encoding: .utf8) { print(t) }
 case "night", "day":
     var st = loadState()

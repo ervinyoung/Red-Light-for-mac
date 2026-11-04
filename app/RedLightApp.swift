@@ -1363,7 +1363,7 @@ final class Model: ObservableObject {
     func force(_ mode: String) { runCLI([mode]) }
     func pause(_ arg: String) { runCLI(["pause", arg]) }
     func resume() { runCLI(["resume"]) }
-    func forget() { runCLI(["forget"]) }
+    func forget() { runCLI(["forget"]); loadForecast() }       // queued behind it: the chart goes back to the starting curve
     func setShade(enabled: Bool? = nil, level: Double? = nil) {
         guard !isOff else { return }
         bringBackIfHeld()
@@ -2116,6 +2116,9 @@ struct SettingsPage: View {
                 TextRow(text: "Adopts what you keep choosing after three similar nights", secondary: true)
             } else {
                 ForEach(m.learned.history.suffix(3).reversed(), id: \.self) { TextRow(text: $0, secondary: true) }
+            }
+            // Lessons aren't in the history: a slider move in a known room adds none, so months of them left nothing to click.
+            if !m.learned.history.isEmpty || (m.forecast?.lessons ?? 0) > 0 {
                 TextRow(text: "Forget Everything Learned").onTapGesture { m.forget() }
             }
             Line()
