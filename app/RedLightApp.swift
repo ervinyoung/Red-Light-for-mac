@@ -1165,15 +1165,18 @@ final class Model: ObservableObject {
     private func resetLux() { luxFast = nil; luxSlow = nil; luxSamples = 0; roomPending = nil }
     func watchRoom() {
         guard Date() >= roomSettleUntil else { return }
-        guard !roomInFlight, !isOff, !isPaused, config.roomLight?.enabled ?? true,
-              isNight || isFading || (shade.warmth ?? 0) > 0.001 else { resetLux(); return }
+        guard !roomInFlight else { resetLux(); return }
+        // Unwatched (off, paused, by day), you may have gone anywhere: coming back is like opening the lid. Left to the slow
+        // path, a pause that ended in another room kept the last room's red for the wait and the ease after it.
+        guard !isOff, !isPaused, config.roomLight?.enabled ?? true,
+              isNight || isFading || (shade.warmth ?? 0) > 0.001 else { resetLux(); roomFresh = true; return }
         let was = state?.room?.kind
         guard let lux = roomSensor.lux() else {
             resetLux(); roomBlind += 1
             // Lid closed: back to the schedule's own level, once it has stayed closed (a display attached). Closing it is
             // nearly always sleep, and `none` sent on the way down woke to the schedule's red for the seconds the room took
             // to read again, then moved it back, and the room coming "new" let go of a look held for now.
-            if was != nil, roomBlind >= 20 { sendRoom(["none"]) }
+            if was != nil, roomBlind >= 20, Date() >= roomQuietUntil { sendRoom(["none"]) }
             return
         }
         if roomBlind > 0 { settleRoom(); return }                    // opened with the Mac awake: no wake says so, and it reads as low
@@ -1184,7 +1187,9 @@ final class Model: ObservableObject {
         luxSamples += 1
         let fast = pow(10, luxFast!) - 3, slow = pow(10, luxSlow!) - 3
         if roomFresh || was == nil {
-            guard luxSamples >= 4 else { return }
+            // The quiet too: an engine that can't answer (config.json with a typo) never records a room, and this asked again
+            // every half second, a refresh with each, all night.
+            guard luxSamples >= 4, roomFresh || Date() >= roomQuietUntil else { return }
             roomFresh = false
             // By the room's own margins, as ever: another room is well past them, and a dark room reading 6 lux off the
             // screen, judged as if new, woke as dim, its red halved in 3 s and a look held for now let go.
