@@ -871,6 +871,14 @@ final class KeyboardHold {
     private var lastTick = -1, lastMove = Date.distantPast       // a requested fade that isn't moving gets asked again
     /// The brightness keys or Control Center set a new level: it becomes the level.
     var onOverride: ((Double) -> Void)?
+    /// The engine's record of a gradual change it has asked macOS for (the room, a fade step), encoded its way.
+    private struct Commanded: Decodable { var fadeUntil: Date? }
+    /// Whether macOS is still drawing one. Levels read on the way are nobody's choice, and the pane only hears of the new
+    /// level a moment after the fade starts: read while you typed, one was saved as the room's level, and taught the curve.
+    private func engineFading() -> Bool {
+        let c = (try? Data(contentsOf: appDir.appendingPathComponent("commanded.json"))).flatMap { try? JSONDecoder().decode(Commanded.self, from: $0) }
+        return c?.fadeUntil.map { Date() < $0 } ?? false
+    }
     init() {
         guard !isSnapshotRun else { return }
         _ = dlopen("/System/Library/PrivateFrameworks/CoreBrightness.framework/CoreBrightness", RTLD_NOW)
@@ -923,8 +931,9 @@ final class KeyboardHold {
             switch w {
             case .off: send(0, 250)
             // Immediately, whatever macOS thought of the keys: quickly under your finger, over 2 s when the room or a
-            // fade moves them (the engine has asked macOS for the same 2 s fade; this only matters if it hadn't).
-            case .level(let v): if wake { lit = true; send(Float(v), idleTime() < 1 ? 250 : 2000) }
+            // fade moves them (the engine has asked macOS for the same 2 s fade; this only matters if it hadn't). Typing
+            // isn't your finger on the slider: it turned the engine's 2 s into a quarter of a second, just when you'd see it.
+            case .level(let v): if wake { lit = true; send(Float(v), idleTime() < 1 && !engineFading() ? 250 : 2000) }
             case .hold: if wake { lit = true }
             case .none: break
             }
@@ -973,7 +982,7 @@ final class KeyboardHold {
         if !lit {                                                       // off after inactivity: wait for a touch
             if idleTime() < 0.5 || idle <= 0 || idleTime() + 0.5 < idle {     // a touch, or the idle time raised past how long you've been away
                 lit = true; up = false; fastDown = false; lastMove = now; markIdle(false)
-                overrideQuietUntil = now.addingTimeInterval(5)
+                overrideQuietUntil = max(overrideQuietUntil, now.addingTimeInterval(5))      // a touch just after waking keeps waking's 8 s
                 if case .level(let v) = want { send(Float(v), 250) }
                 schedule()
             } else if t > 0 && stalled { send(0, 500); lastMove = now }    // something lit them meanwhile
@@ -987,7 +996,7 @@ final class KeyboardHold {
             var ours: Double = 0
             if case .level(let l) = want { ours = l }
             // A level nobody reached for isn't the brightness keys: they, and Control Center's slider, are input.
-            if v > 0.0015, abs(v - ours) > 0.002, Float(v) != lastValue, now >= overrideQuietUntil, idleTime() < 3 {
+            if v > 0.0015, abs(v - ours) > 0.002, Float(v) != lastValue, now >= overrideQuietUntil, idleTime() < 3, !engineFading() {
                 // Unless auto-brightness has just come on (System Settings, or the engine handing the keys back at a pause
                 // or sunrise before the pane has heard): that level is macOS's. Recorded, it would `set keyboard`, which
                 // switches auto-brightness straight back off. Give the keys back; the next refresh says .none too.
@@ -1044,6 +1053,9 @@ final class Model: ObservableObject {
     /// Slider steps queued for the engine and not yet applied. While any are, what the engine reports is a step
     /// behind the finger, and reading it back would snap the thumb, the header and the screen back to that step.
     private var setsInFlight = 0
+    /// The keyboard slider sends nothing until you let go, so no step is in flight; a status landing mid-drag (the minute's
+    /// check, a room change) put the old level back in the header and, through syncKeyboardHold, on the keys.
+    private var keysUnderFinger = false
     private var shadesInFlight = 0          // shade on/off and level queued for shade.json and not yet written
     private var hotkeysLive: Bool?          // whether the shortcuts were last registered for on (true) or off (false)
 
@@ -1088,10 +1100,11 @@ final class Model: ObservableObject {
             guard let self = self else { return }
             self.updater.tick(screenIsPlain: self.isOff || !self.isTinting) }
     }
-    /// Night, Red Shift 80 %, keys at 0.3 % with a 5 s timeout — the "Night" preset, as shipped.
+    /// Night in a dark room, on Auto as most nights are: Red Shift 80 %, keys at 0.3 % with a 5 s timeout.
     func demoLook() {
         if let d = try? Data(contentsOf: configURL), let c = try? dec.decode(Config.self, from: d) { config = c }
-        state = ModeState(mode: "night", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil, disabled: false, heldFor: nil)
+        state = ModeState(mode: "night", daySnapshot: nil, lastSeen: nil, lastNotified: nil, ramp: nil, pausedUntil: nil, disabled: false, heldFor: nil,
+                          room: Room(lux: 2, target: 0.8, darkness: 0.8, at: Date(), kind: "dark"))
         let c = warmthCurve(0.8)
         shade = Shade(enabled: false, level: 0.2, warmth: 0.8, gammaBlue: c.blue, gammaGreen: c.green)
         live = Settings(keyboardBrightness: ProcessInfo.processInfo.environment["REDLIGHT_DEMO_KB"].flatMap(Double.init) ?? 0.003, keyboardIdleDimSeconds: 5, shadeEnabled: false, shadeLevel: 0.2, warmth: 0.8)
@@ -1160,19 +1173,26 @@ final class Model: ObservableObject {
         }
     }
     /// Just after the lid opens the sensor reads low (3 lux in a 17 lux room): start the averages once it has settled.
-    private var roomSettleUntil = Date.distantPast, roomFresh = true
-    func settleRoom() { roomSettleUntil = Date().addingTimeInterval(2.5); resetLux(); roomFresh = true; roomQuietUntil = .distantPast }
+    private var roomSettleUntil = Date.distantPast, roomFresh = true, roomBlind = 0      // roomBlind: readings missed in a row
+    func settleRoom() { roomSettleUntil = Date().addingTimeInterval(2.5); resetLux(); roomFresh = true; roomQuietUntil = .distantPast; roomBlind = 0 }
     private func resetLux() { luxFast = nil; luxSlow = nil; luxSamples = 0; roomPending = nil }
     func watchRoom() {
         guard Date() >= roomSettleUntil else { return }
-        guard !roomInFlight, !isOff, !isPaused, config.roomLight?.enabled ?? true,
-              isNight || isFading || (shade.warmth ?? 0) > 0.001 else { resetLux(); return }
+        guard !roomInFlight else { resetLux(); return }
+        // Unwatched (off, paused, by day), you may have gone anywhere: coming back is like opening the lid. Left to the slow
+        // path, a pause that ended in another room kept the last room's red for the wait and the ease after it.
+        guard !isOff, !isPaused, config.roomLight?.enabled ?? true,
+              isNight || isFading || (shade.warmth ?? 0) > 0.001 else { resetLux(); roomFresh = true; return }
         let was = state?.room?.kind
         guard let lux = roomSensor.lux() else {
-            resetLux()
-            if was != nil { sendRoom(["none"]) }                     // lid closed: back to the schedule's own level
+            resetLux(); roomBlind += 1
+            // Lid closed: back to the schedule's own level, once it has stayed closed (a display attached). Closing it is
+            // nearly always sleep, and `none` sent on the way down woke to the schedule's red for the seconds the room took
+            // to read again, then moved it back, and the room coming "new" let go of a look held for now.
+            if was != nil, roomBlind >= 20, Date() >= roomQuietUntil { sendRoom(["none"]) }
             return
         }
+        if roomBlind > 0 { settleRoom(); return }                    // opened with the Mac awake: no wake says so, and it reads as low
         // log(lux + 3): equal steps for equal ratios, with the dark end's sensor noise (2 lux against 3) damped
         let x = log10(lux + 3)
         luxFast = luxFast.map { $0 + (x - $0) * (1 - exp(-0.5 / 2)) } ?? x
@@ -1180,9 +1200,13 @@ final class Model: ObservableObject {
         luxSamples += 1
         let fast = pow(10, luxFast!) - 3, slow = pow(10, luxSlow!) - 3
         if roomFresh || was == nil {
-            guard luxSamples >= 4 else { return }
+            // The quiet too: an engine that can't answer (config.json with a typo) never records a room, and this asked again
+            // every half second, a refresh with each, all night.
+            guard luxSamples >= 4, roomFresh || Date() >= roomQuietUntil else { return }
             roomFresh = false
-            let k = Self.roomKind(lux: slow, was: nil)
+            // By the room's own margins, as ever: another room is well past them, and a dark room reading 6 lux off the
+            // screen, judged as if new, woke as dim, its red halved in 3 s and a look held for now let go.
+            let k = Self.roomKind(lux: slow, was: was)
             if k != was { sendRoom([k, String(format: "%.1f", slow), "now"]) }
             return
         }
@@ -1232,8 +1256,9 @@ final class Model: ObservableObject {
             let sun = cli("suntimes").trimmingCharacters(in: .whitespacesAndNewlines)
             let status = cli("status")
             // Steps queued after this status (the queue is serial) make it stale; the final step refreshes again.
-            DispatchQueue.main.async { guard let self = self else { return }; self.sunLine = sun; if self.setsInFlight == 0 { self.parseLive(status) } }
+            DispatchQueue.main.async { guard let self = self else { return }; self.sunLine = sun; if self.setsInFlight == 0 && !self.keysUnderFinger { self.parseLive(status) } }
         }
+        if !snapshotMode, forecast == nil || forecastShown { loadForecast() }
     }
     /// Off and true colour both mean the display is drawn exactly as macOS would draw it, whatever shade.json says.
     /// Off is what the switch shows as well as what the engine has recorded: while an `off` is on its way, a refresh
@@ -1298,14 +1323,23 @@ final class Model: ObservableObject {
     /// The kind of room the look is set for now, while Match Room Light has one.
     var roomKindNow: String? { (config.roomLight?.enabled ?? true) ? state?.room?.kind : nil }
     /// Whether the room and the hour are choosing, rather than a look held for now.
-    var nightIsAuto: Bool { isNight && roomKindNow != nil && !isOff && !isPaused && heldFor == nil }
+    var nightIsAuto: Bool { isNight && roomKindNow != nil && !isOff && !isPaused && heldFor == nil && !snapshotDaylight }
     var redIsAuto: Bool { nightIsAuto && state?.holdRed == nil }
     var keysAreAuto: Bool { nightIsAuto && state?.holdKeys == nil && live.keyboardAutoBrightness != true }
+    /// Nothing held for now. Not `redIsAuto && keysAreAuto`: with macOS's own auto-brightness on, nothing is held and the
+    /// night has the red, but the Auto row stayed dark however often it was pressed.
+    var nothingHeld: Bool { nightIsAuto && state?.holdRed == nil && state?.holdKeys == nil }
     func backToAuto() { runCLI(["auto"]) }
     @Published var forecast: Forecast?
+    /// Settings is on screen: every refresh brings the chart up to date, as forgetting, a new location or Adapt to My
+    /// Adjustments change the curve under it, and the page can stay open for hours with its dot left behind. (Read once
+    /// before that, too, so the page doesn't open and then grow.)
+    var forecastShown = false
     func loadForecast() {
+        guard !snapshotDemo else { return }                  // a fixed look, not this Mac's curve
         liveQueue.async { [weak self] in
-            let f = try? JSONDecoder().decode(Forecast.self, from: Data(cli("forecast").utf8))
+            // One that can't be read leaves the last good night up, rather than the page shrinking under you.
+            guard let f = try? JSONDecoder().decode(Forecast.self, from: Data(cli("forecast").utf8)) else { return }
             DispatchQueue.main.async { self?.forecast = f }
         }
     }
@@ -1521,6 +1555,7 @@ final class Model: ObservableObject {
     /// The keyboard slider: the change shows at once on the keys; the engine records it when you let go.
     func setKeyboard(ticks: Double, final: Bool) {
         let v = kbValue(ticks)
+        keysUnderFinger = !final
         live.keyboardBrightness = v; lastKeyboard = v; live.keyboardAutoBrightness = false
         keyboardHold.update(keyboardWant(v), idleSeconds: live.keyboardIdleDimSeconds ?? 5)
         if final { set("keyboard", v > 0 ? String(format: "%.6f", v * 100) : "off") }
@@ -1811,7 +1846,7 @@ struct TextRow: View {
 /// The night ahead: how deep the red goes, sunset to sunrise, in a dark room and (fainter) a dim one, with a dot at now.
 struct NightChart: View {
     let f: Forecast
-    private let red = Color(red: 1, green: 0.26, blue: 0.2)
+    private let red = Color(nsColor: .systemRed)
     private func x(_ t: Double, _ w: CGFloat) -> CGFloat { CGFloat((t - f.from) / max(1, f.to - f.from)) * w }
     private func y(_ v: Double, _ h: CGFloat) -> CGFloat { h - CGFloat(v) * (h - 2) - 1 }
     private func line(_ pts: [[Double]], _ w: CGFloat, _ h: CGFloat) -> Path {
@@ -1819,8 +1854,16 @@ struct NightChart: View {
         for (i, q) in pts.enumerated() { let pt = CGPoint(x: x(q[0], w), y: y(q[1], h)); if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) } }
         return p
     }
+    /// The line closed down to the chart's foot, for the fill beneath it.
+    private func area(_ pts: [[Double]], _ w: CGFloat, _ h: CGFloat) -> Path {
+        guard let first = pts.first, let last = pts.last else { return Path() }
+        var p = line(pts, w, h)
+        p.addLine(to: CGPoint(x: x(last[0], w), y: h)); p.addLine(to: CGPoint(x: x(first[0], w), y: h)); p.closeSubpath()
+        return p
+    }
+    /// Every third hour, the way this Mac writes the time: "9 PM", or "21" with a 24-hour clock.
     private var ticks: [(Double, String)] {
-        let fmt = DateFormatter(); fmt.dateFormat = "h a"
+        let fmt = DateFormatter(); fmt.setLocalizedDateFormatFromTemplate("j")
         var d = Calendar.current.dateInterval(of: .hour, for: Date(timeIntervalSince1970: f.from))!.end, out: [(Double, String)] = []
         while d.timeIntervalSince1970 < f.to {
             if Calendar.current.component(.hour, from: d) % 3 == 0 { out.append((d.timeIntervalSince1970, fmt.string(from: d))) }
@@ -1830,28 +1873,30 @@ struct NightChart: View {
     }
     var body: some View {
         let dark = f.rooms["dark"] ?? [], dim = f.rooms["dim"] ?? []
-        let here = f.rooms[f.room] ?? dark
-        let now = here.min { abs($0[0] - f.now) < abs($1[0] - f.now) }
+        // Early on a long evening the nearest sunrise is still this morning, so the engine gives last night and `now` falls
+        // past its end: no dot, at night. The curve goes by the clock, so last night's line is tonight's, a day on.
+        let t = f.now > f.to ? f.now - 86400 : f.now
+        // On the line of the room you're in; with no room known you're on neither.
+        let now = t >= f.from && t <= f.to ? f.rooms[f.room]?.min { abs($0[0] - t) < abs($1[0] - t) } : nil
         VStack(spacing: 4) {
             GeometryReader { g in
                 let w = g.size.width, h = g.size.height
                 ZStack(alignment: .topLeading) {
-                    var fill = line(dark, w, h)
-                    let end = x(dark.last?[0] ?? f.to, w)
-                    let _ = (fill.addLine(to: CGPoint(x: end, y: h)), fill.addLine(to: CGPoint(x: 0, y: h)), fill.closeSubpath())
-                    fill.fill(LinearGradient(colors: [red.opacity(0.28), red.opacity(0.02)], startPoint: .top, endPoint: .bottom))
+                    area(dark, w, h).fill(LinearGradient(colors: [red.opacity(0.28), red.opacity(0.02)], startPoint: .top, endPoint: .bottom))
                     line(dim, w, h).stroke(red.opacity(0.4), style: StrokeStyle(lineWidth: 1, lineCap: .round))
                     line(dark, w, h).stroke(red, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-                    if let n = now, f.now >= f.from, f.now <= f.to {
-                        Circle().fill(Color.white).frame(width: 7, height: 7).shadow(color: .black.opacity(0.35), radius: 1)
-                            .position(x: x(n[0], w), y: y(n[1], h))
-                    }
+                    if let n = now { Circle().fill(CC.label).frame(width: 7, height: 7).position(x: x(n[0], w), y: y(n[1], h)) }
                 }
             }.frame(height: 56)
             GeometryReader { g in
-                ForEach(ticks, id: \.0) { t in Text(t.1).font(.system(size: 10)).foregroundStyle(CC.secondary).fixedSize().position(x: x(t.0, g.size.width), y: 6) }
-            }.frame(height: 12)
+                let w = g.size.width
+                // A label centred near either end would stick out past the chart and the panel's margin: left out instead.
+                ForEach(ticks.filter { x($0.0, w) >= 18 && x($0.0, w) <= w - 18 }, id: \.0) { t in
+                    Text(t.1).font(CC.subtitle).foregroundStyle(CC.secondary).fixedSize().position(x: x(t.0, w), y: 7)
+                }
+            }.frame(height: 14)
         }
+        .help("Red Shift through the night, in a dark room and, fainter, a dim one")
     }
 }
 struct SettingsRow: View {
@@ -1939,6 +1984,7 @@ struct Panel: View {
         .padding(.horizontal, CC.side)
         .animation(.easeInOut(duration: 0.18), value: waiting)
         .animation(.easeInOut(duration: 0.18), value: m.enabled)
+        .animation(.easeInOut(duration: 0.18), value: m.nightIsAuto)       // the Auto row comes and goes like the rows above
     }
 
     @ViewBuilder var controls: some View {
@@ -1962,7 +2008,7 @@ struct Panel: View {
 
             Header(text: "Presets")
             let list = m.config.presets ?? []
-            if m.nightIsAuto { IconRow(icon: "moon.stars.fill", label: "Auto", active: m.redIsAuto && m.keysAreAuto).onTapGesture { m.backToAuto() } }
+            if m.nightIsAuto { IconRow(icon: "moon.stars.fill", label: "Auto", active: m.nothingHeld).onTapGesture { m.backToAuto() } }
             if list.isEmpty { TextRow(text: "No presets yet", secondary: true) }
             ForEach(list) { p in
                 IconRow(icon: p.icon, label: p.name, trailing: m.nightPresetName == p.name ? "At sunset" : nil, active: isCurrent(p))
@@ -2009,7 +2055,8 @@ struct Panel: View {
     /// applied (only warmth defaults, to 0), so a missing one matches whatever is there rather than counting as off.
     func isCurrent(_ p: Preset) -> Bool {
         let s = p.settings
-        if m.nightIsAuto && m.state?.holdRed == nil { return false }        // the night is choosing, whatever it happens to match
+        // The night is choosing, whatever it happens to match; under true colour too, when nightIsAuto says no but nothing is held.
+        if m.isNight && m.roomKindNow != nil && m.state?.holdRed == nil { return false }
         let kbOK = s.keyboardBrightness.map { abs(kbTicks($0) - kbTicks(m.live.keyboardBrightness)) < 1 } ?? true
         let shadeOK = (s.shadeEnabled ?? m.shade.enabled) == m.shade.enabled
             && (!m.shade.enabled || s.shadeLevel.map { abs($0 - m.shade.level) < 0.02 } ?? true)
@@ -2102,12 +2149,13 @@ struct SettingsPage: View {
             Line()
 
             Header(text: "Your Night")
-            if let f = m.forecast { NightChart(f: f).padding(.vertical, 6) }
+            // Only while it is what happens: with Match Room Light off the night is your own level, not this curve.
+            if let f = m.forecast, m.config.roomLight?.enabled ?? true { NightChart(f: f).padding(.vertical, 6) }
             ToggleRow(label: "Match Room Light", isOn: Binding(get: { m.config.roomLight?.enabled ?? true }, set: {
                 var r = m.config.roomLight ?? RoomLight(); r.enabled = $0; m.config.roomLight = r
                 m.saveConfig(reapply: false); m.runCLI(["room"])           // queued behind the save: on eases to the room, off draws your level
             }), drawn: m.snapshotMode)
-            TextRow(text: "Red Shift and the keyboard follow the hour and the room's light, and every adjustment you make teaches them. Presets are just for now.", secondary: true)
+            TextRow(text: "Red Shift and the keyboard follow the hour and the room’s light, and learn from your adjustments. A preset lasts until the room changes.", secondary: true)
             Line()
 
             Header(text: "Learning")
@@ -2142,8 +2190,8 @@ struct SettingsPage: View {
             SettingsRow(text: "Quit Red Light").onTapGesture { NSApp.terminate(nil) }
         }
         .padding(.horizontal, CC.side)
-        .onAppear { lat = String(m.config.latitude); lon = String(m.config.longitude); m.loadForecast() }
-        .onDisappear { m.stopRecording() }
+        .onAppear { lat = String(m.config.latitude); lon = String(m.config.longitude); m.forecastShown = true; m.loadForecast() }
+        .onDisappear { m.stopRecording(); m.forecastShown = false }
     }
     var locationLabel: String {
         let c = String(format: "%.2f, %.2f", m.config.latitude, m.config.longitude)
