@@ -781,7 +781,10 @@ func roomKind(lux: Double, was: String?) -> String {
 //    curve is right, and it stays right.
 //  - Tonight a choice also shifts the red at once, exactly to what you set, and fades back onto the curve (`roomRed`).
 // Backtested on those choices, each predicted from the ones before it: 18 points off with one number per room, 8 with this.
-struct Choice: Codable { var t: Date; var field: String; var room: String; var value: Double }
+/// `clock`: the night clock where you were when you chose. `t` read in today's zone moved every lesson by the difference
+/// after a flight: 11 PM at home counted as 2 AM in New York, when 11 PM is what you meant, wherever you are.
+struct Choice: Codable { var t: Date; var field: String; var room: String; var value: Double; var clock: Double? = nil
+    var hour: Double { clock ?? nightClock(t) } }
 struct Nudge: Codable { var delta: Double; var at: Date; var room: String }
 let choicesURL = appDir.appendingPathComponent("choices.jsonl")
 let lineEnc: JSONEncoder = { let e = JSONEncoder(); e.outputFormatting = [.sortedKeys]; e.dateEncodingStrategy = .iso8601; return e }()
@@ -794,7 +797,8 @@ func choiceLines() -> [(raw: Data, choice: Choice?)] {
 func loadChoices() -> [Choice] { choiceLines().compactMap { $0.choice } }
 /// A drag is one choice: the last of a burst replaces the rest. The newest 400 are kept. What can't be read stays in the
 /// file as it was: it may be one typo from a lesson, and it's yours.
-func saveChoice(_ c: Choice) {
+func saveChoice(_ choice: Choice) {
+    var c = choice; c.clock = c.hour
     var lines = choiceLines()
     if let i = lines.lastIndex(where: { $0.choice != nil }), let l = lines[i].choice, l.field == c.field, l.room == c.room, c.t.timeIntervalSince(l.t) < 45 { lines.remove(at: i) }
     guard let new = try? lineEnc.encode(c) else { return }
@@ -836,7 +840,7 @@ func nearInTime(_ a: Double, _ b: Double) -> Double { exp(-pow((a - b) / 90, 2) 
 func predictRed(_ kind: String, at d: Date) -> Double {
     let u = nightClock(d); var num = 0.0, den = 0.0
     for (age, c) in roomChoices.filter({ $0.field == "red" }).reversed().enumerated() {
-        let cu = nightClock(c.t); var w = nearInTime(u, cu) * pow(0.97, Double(age)), off = c.value - redPrior(cu, c.room)
+        let cu = c.hour; var w = nearInTime(u, cu) * pow(0.97, Double(age)), off = c.value - redPrior(cu, c.room)
         if c.room != kind {
             if c.room == "lit" || kind == "lit" { continue }
             w /= 2; off *= kind == "dim" ? 0.5 : 2                       // dark and dim share what they learn, at their scale
@@ -848,7 +852,7 @@ func predictRed(_ kind: String, at d: Date) -> Double {
 func predictKeys(_ kind: String, at d: Date) -> Double {
     let u = nightClock(d); var num = 0.0, den = 0.0
     for (age, c) in roomChoices.filter({ $0.field == "keys" && $0.room == kind }).reversed().enumerated() {
-        let cu = nightClock(c.t), w = nearInTime(u, cu) * pow(0.97, Double(age))
+        let cu = c.hour, w = nearInTime(u, cu) * pow(0.97, Double(age))
         num += w * (log(max(1, c.value)) - keysPrior(cu, kind)); den += w
     }
     return exp(keysPrior(u, kind) + num / (2 + den))
