@@ -1335,6 +1335,7 @@ final class Model: ObservableObject {
     /// The curve is what the night will do only with a room to go by. Without a sensor (a Mac mini) or with Match Room
     /// Light off, the night is the schedule's own steady level, as it always was, and a chart of a deepening curve isn't true.
     var nightFollowsCurve: Bool { roomSensor.present && (config.roomLight?.enabled ?? true) }
+    var hasRoomSensor: Bool { roomSensor.present }
     @Published var forecast: Forecast?
     /// Settings is on screen: every refresh brings the chart up to date, as forgetting, a new location or Adapt to My
     /// Adjustments change the curve under it, and the page can stay open for hours with its dot left behind. (Read once
@@ -2016,7 +2017,7 @@ struct Panel: View {
             if m.nightIsAuto { IconRow(icon: "moon.stars.fill", label: "Auto", active: m.nothingHeld).onTapGesture { m.backToAuto() } }
             if list.isEmpty { TextRow(text: "No presets yet", secondary: true) }
             ForEach(list) { p in
-                IconRow(icon: p.icon, label: p.name, trailing: m.nightPresetName == p.name ? "At sunset" : nil, active: isCurrent(p))
+                IconRow(icon: p.icon, label: p.name, trailing: m.nightPresetName == p.name && !m.nightFollowsCurve ? "At sunset" : nil, active: isCurrent(p))
                     .onTapGesture { m.applyPreset(p) }
                     .contextMenu {
                         Button("Apply") { m.applyPreset(p) }
@@ -2150,26 +2151,21 @@ struct SettingsPage: View {
                     ForEach(fades, id: \.1) { Text($0.0).tag($0.1) }
                 }.labelsHidden().controlSize(.small).frame(width: 96)
             }.frame(height: 32)
-            TextRow(text: m.nightPresetName.map { "Sunset eases into “\($0)”" } ?? "Sunset eases into a custom mix", secondary: true)
+            if !m.nightFollowsCurve { TextRow(text: m.nightPresetName.map { "Sunset eases into “\($0)”" } ?? "Sunset eases into a custom mix", secondary: true) }
             Line()
 
             Header(text: "Your Night")
             // Only while it is what happens: without a sensor, or with Match Room Light off, the night is your own level.
             if let f = m.forecast, m.nightFollowsCurve { NightChart(f: f).padding(.vertical, 6) }
-            ToggleRow(label: "Match Room Light", isOn: Binding(get: { m.config.roomLight?.enabled ?? true }, set: {
-                var r = m.config.roomLight ?? RoomLight(); r.enabled = $0; m.config.roomLight = r
-                m.saveConfig(reapply: false); m.runCLI(["room"])           // queued behind the save: on eases to the room, off draws your level
-            }), drawn: m.snapshotMode)
-            TextRow(text: "Red Shift and the keyboard follow the hour and the room’s light, and learn from your adjustments. A preset lasts until the room changes.", secondary: true)
-            Line()
-
-            Header(text: "Learning")
-            ToggleRow(label: "Adapt to My Adjustments", isOn: Binding(get: { m.config.learning?.enabled ?? true }, set: { var l = m.config.learning ?? Learning(); l.enabled = $0; m.config.learning = l; m.saveConfig(reapply: false) }), drawn: m.snapshotMode)
-            if m.learned.history.isEmpty {
-                TextRow(text: "Adopts what you keep choosing after three similar nights", secondary: true)
-            } else {
-                ForEach(m.learned.history.suffix(3).reversed(), id: \.self) { TextRow(text: $0, secondary: true) }
+            if m.hasRoomSensor {
+                ToggleRow(label: "Match Room Light", isOn: Binding(get: { m.config.roomLight?.enabled ?? true }, set: {
+                    var r = m.config.roomLight ?? RoomLight(); r.enabled = $0; m.config.roomLight = r
+                    m.saveConfig(reapply: false); m.runCLI(["room"])       // queued behind the save: on eases to the room, off draws your level
+                }), drawn: m.snapshotMode)
             }
+            ToggleRow(label: "Adapt to My Adjustments", isOn: Binding(get: { m.config.learning?.enabled ?? true }, set: { var l = m.config.learning ?? Learning(); l.enabled = $0; m.config.learning = l; m.saveConfig(reapply: false) }), drawn: m.snapshotMode)
+            TextRow(text: m.nightFollowsCurve ? "Red Shift and the keyboard follow the hour and the room’s light. A preset lasts until the room changes."
+                                              : "Adopts what you keep choosing after three similar nights", secondary: true)
             // Lessons aren't in the history: a slider move in a known room adds none, so months of them left nothing to click.
             if !m.learned.history.isEmpty || (m.forecast?.lessons ?? 0) > 0 {
                 TextRow(text: "Forget Everything Learned").onTapGesture { m.forget() }
