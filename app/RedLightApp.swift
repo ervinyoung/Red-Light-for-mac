@@ -1160,8 +1160,8 @@ final class Model: ObservableObject {
         }
     }
     /// Just after the lid opens the sensor reads low (3 lux in a 17 lux room): start the averages once it has settled.
-    private var roomSettleUntil = Date.distantPast, roomFresh = true
-    func settleRoom() { roomSettleUntil = Date().addingTimeInterval(2.5); resetLux(); roomFresh = true; roomQuietUntil = .distantPast }
+    private var roomSettleUntil = Date.distantPast, roomFresh = true, roomBlind = 0      // roomBlind: readings missed in a row
+    func settleRoom() { roomSettleUntil = Date().addingTimeInterval(2.5); resetLux(); roomFresh = true; roomQuietUntil = .distantPast; roomBlind = 0 }
     private func resetLux() { luxFast = nil; luxSlow = nil; luxSamples = 0; roomPending = nil }
     func watchRoom() {
         guard Date() >= roomSettleUntil else { return }
@@ -1169,10 +1169,14 @@ final class Model: ObservableObject {
               isNight || isFading || (shade.warmth ?? 0) > 0.001 else { resetLux(); return }
         let was = state?.room?.kind
         guard let lux = roomSensor.lux() else {
-            resetLux()
-            if was != nil { sendRoom(["none"]) }                     // lid closed: back to the schedule's own level
+            resetLux(); roomBlind += 1
+            // Lid closed: back to the schedule's own level, once it has stayed closed (a display attached). Closing it is
+            // nearly always sleep, and `none` sent on the way down woke to the schedule's red for the seconds the room took
+            // to read again, then moved it back, and the room coming "new" let go of a look held for now.
+            if was != nil, roomBlind >= 20 { sendRoom(["none"]) }
             return
         }
+        if roomBlind > 0 { settleRoom(); return }                    // opened with the Mac awake: no wake says so, and it reads as low
         // log(lux + 3): equal steps for equal ratios, with the dark end's sensor noise (2 lux against 3) damped
         let x = log10(lux + 3)
         luxFast = luxFast.map { $0 + (x - $0) * (1 - exp(-0.5 / 2)) } ?? x
