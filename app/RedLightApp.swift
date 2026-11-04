@@ -871,6 +871,14 @@ final class KeyboardHold {
     private var lastTick = -1, lastMove = Date.distantPast       // a requested fade that isn't moving gets asked again
     /// The brightness keys or Control Center set a new level: it becomes the level.
     var onOverride: ((Double) -> Void)?
+    /// The engine's record of a gradual change it has asked macOS for (the room, a fade step), encoded its way.
+    private struct Commanded: Decodable { var fadeUntil: Date? }
+    /// Whether macOS is still drawing one. Levels read on the way are nobody's choice, and the pane only hears of the new
+    /// level a moment after the fade starts: read while you typed, one was saved as the room's level, and taught the curve.
+    private func engineFading() -> Bool {
+        let c = (try? Data(contentsOf: appDir.appendingPathComponent("commanded.json"))).flatMap { try? JSONDecoder().decode(Commanded.self, from: $0) }
+        return c?.fadeUntil.map { Date() < $0 } ?? false
+    }
     init() {
         guard !isSnapshotRun else { return }
         _ = dlopen("/System/Library/PrivateFrameworks/CoreBrightness.framework/CoreBrightness", RTLD_NOW)
@@ -923,8 +931,9 @@ final class KeyboardHold {
             switch w {
             case .off: send(0, 250)
             // Immediately, whatever macOS thought of the keys: quickly under your finger, over 2 s when the room or a
-            // fade moves them (the engine has asked macOS for the same 2 s fade; this only matters if it hadn't).
-            case .level(let v): if wake { lit = true; send(Float(v), idleTime() < 1 ? 250 : 2000) }
+            // fade moves them (the engine has asked macOS for the same 2 s fade; this only matters if it hadn't). Typing
+            // isn't your finger on the slider: it turned the engine's 2 s into a quarter of a second, just when you'd see it.
+            case .level(let v): if wake { lit = true; send(Float(v), idleTime() < 1 && !engineFading() ? 250 : 2000) }
             case .hold: if wake { lit = true }
             case .none: break
             }
@@ -973,7 +982,7 @@ final class KeyboardHold {
         if !lit {                                                       // off after inactivity: wait for a touch
             if idleTime() < 0.5 || idle <= 0 || idleTime() + 0.5 < idle {     // a touch, or the idle time raised past how long you've been away
                 lit = true; up = false; fastDown = false; lastMove = now; markIdle(false)
-                overrideQuietUntil = now.addingTimeInterval(5)
+                overrideQuietUntil = max(overrideQuietUntil, now.addingTimeInterval(5))      // a touch just after waking keeps waking's 8 s
                 if case .level(let v) = want { send(Float(v), 250) }
                 schedule()
             } else if t > 0 && stalled { send(0, 500); lastMove = now }    // something lit them meanwhile
@@ -987,7 +996,7 @@ final class KeyboardHold {
             var ours: Double = 0
             if case .level(let l) = want { ours = l }
             // A level nobody reached for isn't the brightness keys: they, and Control Center's slider, are input.
-            if v > 0.0015, abs(v - ours) > 0.002, Float(v) != lastValue, now >= overrideQuietUntil, idleTime() < 3 {
+            if v > 0.0015, abs(v - ours) > 0.002, Float(v) != lastValue, now >= overrideQuietUntil, idleTime() < 3, !engineFading() {
                 // Unless auto-brightness has just come on (System Settings, or the engine handing the keys back at a pause
                 // or sunrise before the pane has heard): that level is macOS's. Recorded, it would `set keyboard`, which
                 // switches auto-brightness straight back off. Give the keys back; the next refresh says .none too.
