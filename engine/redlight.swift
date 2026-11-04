@@ -1105,10 +1105,14 @@ case "auto":
     if roomOutOfDate() { reliftWarmth(&st) }
     saveState(st)
 case "forecast":
-    // The night ahead for the Settings chart: the red by kind of room, from sunset to sunrise, on the night clock.
+    // The night ahead for the Settings chart: the red by kind of room, from sunset to sunrise, on the night clock. The night
+    // under way, or by day tonight's, between the switches as they fall: paired by which sunrise and sunset were nearest
+    // now, it was last night all day and the night before that until 12 hours past sunrise. Polar: the day around now.
     let st = loadState()
-    let (rise, set) = sunTimes(cfg: cfg, learned: learned, near: now)
-    let from = set < rise ? set : set.addingTimeInterval(-86400), to = rise > from ? rise : rise.addingTimeInterval(86400)
+    let ts = transitions(cfg: cfg, learned: learned, now: now)
+    let dusk = isNight(cfg: cfg, learned: learned, now: now) ? ts.last(where: { $0.night && $0.at <= now })?.at : ts.first(where: { $0.night && $0.at > now })?.at
+    let dawn = dusk.flatMap { d in ts.first(where: { !$0.night && $0.at > d })?.at }
+    let from = dusk ?? now.addingTimeInterval(-43200), to = dawn ?? from.addingTimeInterval(dusk == nil ? 86400 : 43200)
     var rooms: [String: [[Double]]] = [:]
     for kind in ["dark", "dim", "lit"] {
         rooms[kind] = stride(from: from.timeIntervalSince1970, through: to.timeIntervalSince1970, by: 900).map { t in
