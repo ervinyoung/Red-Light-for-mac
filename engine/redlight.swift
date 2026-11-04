@@ -344,7 +344,9 @@ func blend(_ from: Settings, _ to: Settings, _ t: Double) -> Settings {
 
 // MARK: - Sunrise / sunset (NOAA)
 func sunTimes(lat: Double, lon: Double, date: Date) -> (rise: Date?, set: Date?) {
-    let cal = Calendar.current
+    // Gregorian whatever this Mac's calendar: `toDate` below reads these year, month and day as Gregorian ones. A Thai
+    // (2569) or Japanese (Reiwa 8) year put every sunrise and sunset centuries away, and each check called it night, all day.
+    var cal = Calendar(identifier: .gregorian); cal.timeZone = .current
     let startOfDay = cal.startOfDay(for: date)
     let jd = startOfDay.timeIntervalSince1970 / 86400.0 + 2440587.5
     func rad(_ d: Double) -> Double { d * .pi / 180 }
@@ -406,7 +408,7 @@ func isNight(cfg: Config, learned: Learned, now: Date) -> Bool {
         if let last = ts.last(where: { $0.at <= now }) { return last.night }
         if let next = ts.first { return !next.night }   // a location far east of the Mac's zone: its day starts later
     }
-    let m = Calendar.current.component(.month, from: now)   // polar day or night: no sunrise or sunset for days
+    let m = Calendar(identifier: .gregorian).component(.month, from: now)   // polar day or night: no sunrise or sunset for days
     return cfg.latitude > 0 ? (m >= 10 || m <= 3) : (m >= 4 && m <= 9)
 }
 /// The transition that most recently began (for computing fade progress after a sleep).
