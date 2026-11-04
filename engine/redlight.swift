@@ -496,7 +496,10 @@ func observe(cfg: Config, learned: Learned, state: State, now: Date) -> (State, 
     changed("warmth", prev.warmth, cur.warmth, tol: 0.02)
     // The tint leg follows warmth across 60 %: easing red from 80 % to 50 % is one change, not also "switched the
     // filter off" — which the timing rules would read as turning red light off and move sunrise or sunset.
-    if prev.warmth == cur.warmth { changed("filterEnabled", prev.filterEnabled.map { $0 ? 1 : 0 }, cur.filterEnabled.map { $0 ? 1 : 0 }, tol: 0.5) }
+    // Under a room the slider moves the red and not the warmth chosen beneath it, so the two compare equal: a filter that
+    // is where the drawn warmth puts it isn't a change either. (It also ended a running fade, as a tint switched by hand.)
+    let asDrawn = cur.filterEnabled == (tintTarget(loadShade()) > 0.001 && !holdTint)
+    if prev.warmth == cur.warmth && !asDrawn { changed("filterEnabled", prev.filterEnabled.map { $0 ? 1 : 0 }, cur.filterEnabled.map { $0 ? 1 : 0 }, tol: 0.5) }
     // Below macOS's minimum every level is within 0.001 of the next, so a hand-set Extra Dim level (or off) is told
     // by its ticks as well: a fade used to carry on over it.
     changed("keyboardBrightness", prev.keyboardBrightness, cur.keyboardBrightness, tol: 0.005,
