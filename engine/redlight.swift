@@ -159,6 +159,8 @@ struct State: Codable {
     var nudgeRed: Nudge?
     var holdRed: Double?
     var holdKeys: Double?
+    /// With no reading (the lid closed), the kind of room there last was: opening on the same kind keeps what's held.
+    var roomBefore: String?
 }
 struct Room: Codable { var lux: Double; var target: Double; var darkness: Double; var at: Date; var kind: String? }
 struct Learned: Codable {
@@ -974,7 +976,11 @@ func senseRoom(_ st: inout State, now: Date, kind given: String? = nil, lux luxG
     let enabled = roomEnabled
     let lux = enabled ? (luxGiven ?? (given == nil ? roomLux() : nil)) : nil
     let kind = enabled ? (given ?? lux.map { roomKind(lux: $0, was: st.room?.kind) }) : nil, was = st.room?.kind
-    if kind != was { st.holdRed = nil; st.holdKeys = nil; roomHoldRed = nil; roomHoldKeys = nil; st.ramp?.keysPinned = nil }
+    // No reading isn't a new room: the lid closed, and it may open on the same kind, so what's held waits to see. (Match
+    // Room Light off is the end of the room, and lets go.) Compared with `was` alone, every lid let go of a preset or keys.
+    let before = was ?? st.roomBefore
+    if (kind != nil ? kind != before : !enabled) { st.holdRed = nil; st.holdKeys = nil; roomHoldRed = nil; roomHoldKeys = nil; st.ramp?.keysPinned = nil }
+    st.roomBefore = kind == nil && enabled ? before : nil
     if let kind = kind {
         roomKindNow = kind; roomActive = true; roomLevel = roomRed(now)
         if kind != was { log(String(format: "%@ room%@: red shift %.0f%%", kind, lux.map { String(format: " (%.0f lux)", $0) } ?? "", roomLevel * 100)) }
@@ -1095,7 +1101,7 @@ case "room":
     let arg = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : nil
     let luxArg = CommandLine.arguments.count > 3 ? Double(CommandLine.arguments[3]) : arg.flatMap(Double.init)
     let kindArg = ["dark", "dim", "lit"].contains(arg ?? "") ? arg : nil
-    let moved = arg == "none" ? { st.room = nil; roomKindNow = nil; roomActive = false; return roomOutOfDate() }()
+    let moved = arg == "none" ? { st.roomBefore = st.room?.kind ?? st.roomBefore; st.room = nil; roomKindNow = nil; roomActive = false; return roomOutOfDate() }()
                               : senseRoom(&st, now: now, kind: kindArg, lux: luxArg)
     if moved { reliftWarmth(&st, ease: CommandLine.arguments.count > 4 ? 3 : nil) }
     saveState(st)
