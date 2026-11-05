@@ -159,6 +159,8 @@ struct State: Codable {
     var nudgeRed: Nudge?
     var holdRed: Double?
     var holdKeys: Double?
+    /// The screen shade and idle time a preset held for now replaced, to give back when it lets go.
+    var presetWas: Settings?
     /// With no reading (the lid closed), the kind of room there last was: opening on the same kind keeps what's held.
     var roomBefore: String?
 }
@@ -891,7 +893,7 @@ var roomOutside = 0.0                               // the warmth at the day end
 func setRoomContext(cfg: Config, learned: Learned, state: State?, now: Date) {
     roomEnabled = (cfg.roomLight ?? RoomLight()).enabled
     roomAdapts = (cfg.learning ?? Learning()).enabled
-    roomChoices = roomAdapts ? loadChoices() : []
+    roomChoices = loadChoices()                      // off stops the lessons, it doesn't unlearn them
     roomKindNow = roomEnabled ? state?.room?.kind : nil
     roomActive = roomKindNow != nil
     roomNudge = state?.nudgeRed; roomHoldRed = state?.holdRed; roomHoldKeys = state?.holdKeys
@@ -941,9 +943,17 @@ func chooseKeys(_ st: inout State, _ b: Double, now: Date) {
     st.holdKeys = b; roomHoldKeys = b
     log(String(format: "%@ room: you chose keyboard %.6f", kind, b))
 }
+/// A preset lets go: its shade and idle time go with it, or Auto would light with Movie's shade still down.
+func releasePreset(_ st: inout State) {
+    guard let was = st.presetWas else { return }
+    st.presetWas = nil
+    apply(was, label: "PRESET OVER", quiet: true)
+    let cur = readCurrent()
+    st.lastSeen?.keyboardIdleDimSeconds = cur.keyboardIdleDimSeconds; st.lastSeen?.shadeEnabled = cur.shadeEnabled; st.lastSeen?.shadeLevel = cur.shadeLevel
+}
 /// Back to the curve: tonight's nudge and anything held for now are gone.
 func clearNight(_ st: inout State) {
-    st.nudgeRed = nil; st.holdRed = nil; st.holdKeys = nil
+    st.nudgeRed = nil; st.holdRed = nil; st.holdKeys = nil; st.presetWas = nil
     roomNudge = nil; roomHoldRed = nil; roomHoldKeys = nil
     if roomActive { roomLevel = roomRed(Date()) }
 }
@@ -988,7 +998,7 @@ func senseRoom(_ st: inout State, now: Date, kind given: String? = nil, lux luxG
     // No reading isn't a new room: the lid closed, and it may open on the same kind, so what's held waits to see. (Match
     // Room Light off is the end of the room, and lets go.) Compared with `was` alone, every lid let go of a preset or keys.
     let before = was ?? st.roomBefore
-    if (kind != nil ? kind != before : !enabled) { st.holdRed = nil; st.holdKeys = nil; roomHoldRed = nil; roomHoldKeys = nil; st.ramp?.keysPinned = nil }
+    if (kind != nil ? kind != before : !enabled) { st.holdRed = nil; st.holdKeys = nil; roomHoldRed = nil; roomHoldKeys = nil; st.ramp?.keysPinned = nil; releasePreset(&st) }
     st.roomBefore = kind == nil && enabled ? before : nil
     if let kind = kind {
         roomKindNow = kind; roomActive = true; roomLevel = roomRed(now)
@@ -1113,13 +1123,18 @@ case "room":
     let moved = arg == "none" ? { st.roomBefore = st.room?.kind ?? st.roomBefore; st.room = nil; roomKindNow = nil; roomActive = false; return roomOutOfDate() }()
                               : senseRoom(&st, now: now, kind: kindArg, lux: luxArg)
     if moved { reliftWarmth(&st, ease: CommandLine.arguments.count > 4 ? 3 : nil) }
+    // Match Room Light switched off: the keys go back to the night's own level, as the red just did.
+    if !roomEnabled, arg == nil, st.mode == "night", st.ramp == nil, let b = nightPreset(cfg: cfg, learned: learned).keyboardBrightness {
+        var s = Settings(); s.keyboardBrightness = b; s.keyboardAutoBrightness = false
+        apply(s, label: "ROOM OFF", quiet: true, ease: 1); st.lastSeen?.keyboardBrightness = b; st.lastSeen?.keyboardAutoBrightness = false
+    }
     saveState(st)
 case "auto":
     // Back to what the night and the room call for.
     var st = loadState() ?? blank()
     if st.disabled == true || (st.pausedUntil.map { now < $0 } ?? false) { exit(0) }
     holdTint = st.heldFor != nil
-    clearNight(&st); st.ramp?.keysPinned = nil      // keys set during a fade would hold when it ends
+    releasePreset(&st); clearNight(&st); st.ramp?.keysPinned = nil      // keys set during a fade would hold when it ends
     var sh = loadShade()                            // a look held at off leaves no warmth for the room's level to show through
     // Put back here, not by you: unseen, the next check recorded it as your change and counted it towards the night's level.
     if (sh.base ?? 0) <= 0.001, st.mode == "night" { sh.base = nightPreset(cfg: cfg, learned: learned).warmth; saveShade(sh); st.lastSeen?.warmth = sh.base }
@@ -1282,6 +1297,8 @@ case "preset":
         // A preset is for now: it holds until the room changes and teaches nothing.
         let forNow = roomActive && roomNightness > 0
         if forNow, var st = loadState() {
+            let was = readCurrent()
+            st.presetWas = st.presetWas ?? Settings(keyboardIdleDimSeconds: was.keyboardIdleDimSeconds, shadeEnabled: was.shadeEnabled, shadeLevel: was.shadeLevel)
             st.holdRed = levelFor(max(0, min(1, s.warmth ?? 0))); roomHoldRed = st.holdRed; roomLevel = roomRed(now)
             if roomNightness >= 0.999, let b = s.keyboardBrightness { st.holdKeys = b; roomHoldKeys = b }
             let sh = loadShade(); s.warmth = max(0.01, sh.base ?? sh.warmth ?? 0.01)
@@ -1394,6 +1411,13 @@ case "forget":
     try? FileManager.default.removeItem(at: eventsURL)
     try? FileManager.default.removeItem(at: choicesURL)
     log("forgot all learned adjustments and observations")
+    // Tonight too: a nudge left behind would keep shifting the curve you just cleared.
+    if var st = loadState() {
+        roomChoices = []; holdTint = st.heldFor != nil
+        releasePreset(&st); clearNight(&st)
+        if st.disabled != true, !(st.pausedUntil.map { now < $0 } ?? false), roomOutOfDate() { reliftWarmth(&st) }
+        saveState(st)
+    }
 case "curve":
     for w in stride(from: 0.0, through: 1.0, by: 0.1) { let c = warmthCurve(w); print(String(format: "warmth %3.0f%%  blue %.2f  green %.2f  tint %.2f", w * 100, c.blue, c.green, c.tint)) }
 default:
