@@ -1276,14 +1276,26 @@ case "preset":
         var s = p.settings
         if s.warmth == nil { s.warmth = 0 }
         if s.keyboardBrightness != nil { s.keyboardAutoBrightness = false }
-        // At night in a known kind of room, the preset's Red Shift becomes that room's level, like the slider.
-        // A preset is for now: it holds until the room changes and teaches the curve nothing.
-        if roomActive && roomNightness > 0, var st = loadState() {
+        // At night in a known kind of room, the preset's Red Shift becomes that room's level, like the slider, over the
+        // schedule's own warmth: a preset of no red left 0 beneath it, so the curve couldn't come back when the room changed.
+        // A preset is for now: it holds until the room changes and teaches nothing.
+        let forNow = roomActive && roomNightness > 0
+        if forNow, var st = loadState() {
             st.holdRed = levelFor(max(0, min(1, s.warmth ?? 0))); roomHoldRed = st.holdRed; roomLevel = roomRed(now)
             if roomNightness >= 0.999, let b = s.keyboardBrightness { st.holdKeys = b; roomHoldKeys = b }
+            let sh = loadShade(); s.warmth = max(0.01, sh.base ?? sh.warmth ?? 0.01)
             saveState(st)
         }
         apply(s, label: "PRESET \(p.name)")
+        // What it changed is seen here, so the next check doesn't record it as yours and learn it; a fade still leaves it be.
+        if forNow, var st = loadState() {
+            let cur = readCurrent(); var touched: Set<String> = []
+            if s.keyboardBrightness != nil { touched.insert("keyboardBrightness"); st.lastSeen?.keyboardBrightness = cur.keyboardBrightness; st.lastSeen?.keyboardAutoBrightness = cur.keyboardAutoBrightness }
+            if s.keyboardIdleDimSeconds != nil { touched.insert("keyboardIdleDimSeconds"); st.lastSeen?.keyboardIdleDimSeconds = cur.keyboardIdleDimSeconds }
+            if s.shadeEnabled != nil || s.shadeLevel != nil { touched.insert("shadeEnabled"); st.lastSeen?.shadeEnabled = cur.shadeEnabled; st.lastSeen?.shadeLevel = cur.shadeLevel }
+            if var r = st.ramp { pin(&r, touched, at: cur); st.ramp = r }
+            saveState(st)
+        }
     case "save":
         guard !name.isEmpty else { print("usage: redlight preset save <name> [sf-symbol]"); exit(2) }
         var cur = readCurrent()
