@@ -887,6 +887,7 @@ func kbFromTicks(_ t: Double) -> Double { t <= 0 ? 0 : t < 54 ? t / 54 * kbFloor
 var roomLevel = 0.0, roomActive = false, roomNightness = 0.0, roomKindNow: String? = nil
 var roomEnabled = true, roomAdapts = true, roomChoices: [Choice] = []
 var roomNudge: Nudge? = nil, roomHoldRed: Double? = nil, roomHoldKeys: Double? = nil, roomSunsetFade = false
+var roomOutside = 0.0                               // the warmth at the day end of a fade under way (see `nightness`)
 func setRoomContext(cfg: Config, learned: Learned, state: State?, now: Date) {
     roomEnabled = (cfg.roomLight ?? RoomLight()).enabled
     roomAdapts = (cfg.learning ?? Learning()).enabled
@@ -945,6 +946,8 @@ func clearNight(_ st: inout State) {
 /// How far into night the schedule is: 0 by day, 1 at night, and the fade's progress in between, so the room's level
 /// rides the sunset fade in and the sunrise fade out rather than jumping at either.
 func nightness(_ st: State?, now: Date) -> Double {
+    // A fade runs between the room's level and the look at its day end, which isn't always nothing: a preset put on early.
+    roomOutside = (st?.mode == "night" ? st?.ramp?.from.warmth : st?.ramp?.to.warmth) ?? 0
     guard let st = st else { return 0 }
     let t = st.ramp.map { max(0, min(1, now.timeIntervalSince($0.start) / $0.seconds)) }
     switch st.mode { case "night": return t ?? 1; case "day": return t.map { 1 - $0 } ?? 0; default: return 0 }
@@ -956,7 +959,9 @@ func nightness(_ st: State?, now: Date) -> Double {
 func lifted(_ w: Double) -> Double {
     let w = max(0, min(1, w))
     guard roomActive, roomNightness > 0, w > 0.001 else { return w }
-    return roomLevel * (roomSunsetFade && (roomHoldRed != nil || roomNudge != nil) ? 1 : roomNightness)
+    if roomSunsetFade && (roomHoldRed != nil || roomNudge != nil) { return min(1, roomLevel) }
+    // From the look at the fade's day end, not from nothing: red on before sunset snapped from 60 % to 1 % as the fade began.
+    return min(1, roomLevel * roomNightness + roomOutside * (1 - roomNightness))
 }
 /// The keyboard level for this room now, once night has fully arrived (the sunset and sunrise fades ease the keys
 /// themselves) and the look is a night one: an off or paused look (no red) keeps its own keys, and so does
