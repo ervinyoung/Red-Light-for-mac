@@ -1121,7 +1121,8 @@ case "auto":
     holdTint = st.heldFor != nil
     clearNight(&st); st.ramp?.keysPinned = nil      // keys set during a fade would hold when it ends
     var sh = loadShade()                            // a look held at off leaves no warmth for the room's level to show through
-    if (sh.base ?? 0) <= 0.001, st.mode == "night" { sh.base = nightPreset(cfg: cfg, learned: learned).warmth; saveShade(sh) }
+    // Put back here, not by you: unseen, the next check recorded it as your change and counted it towards the night's level.
+    if (sh.base ?? 0) <= 0.001, st.mode == "night" { sh.base = nightPreset(cfg: cfg, learned: learned).warmth; saveShade(sh); st.lastSeen?.warmth = sh.base }
     if roomOutOfDate() { reliftWarmth(&st) }
     saveState(st)
 case "forecast":
