@@ -912,14 +912,18 @@ func roomRed(_ now: Date) -> Double {
         let age = now.timeIntervalSince(n.at)
         if age < 12 * 3600 { p += n.delta * (n.room == kind ? 1 : 0.5) * pow(0.5, age / 7200) }
     }
-    return max(0, min(1, p))
+    return max(0, p)                                // past 1 only for `levelFor` late in a sunrise; `lifted` keeps the look to 1
 }
+/// The room's level that puts `shown` on screen now. The sunset fade leaves what you choose as it is (see `lifted`). The
+/// sunrise fade scales it, and may need a level past 1 to do so, since what's left of the night only falls: held to 1,
+/// 30 % with an eighth of the night left drew 11 % and the slider jumped back under the finger.
+func levelFor(_ shown: Double) -> Double { roomSunsetFade ? shown : max(0, (shown - roomOutside * (1 - roomNightness)) / roomNightness) }
 /// You set the red at night: a lesson for the curve, and tonight's nudge. Off isn't a lesson, just off for now. The lesson
 /// is what you asked to see at this hour, never that read through a fade's progress: 15 % set three minutes into sunset
 /// taught 100 %, and climbed to 91 % by the end of the fade.
 func chooseRed(_ st: inout State, _ shown: Double, now: Date) {
     guard let kind = roomKindNow, roomNightness > 0 else { return }
-    let x = max(0, min(1, shown / (roomSunsetFade ? 1 : roomNightness)))
+    let x = levelFor(shown)
     if x <= 0.01 {
         if roomAdapts { saveChoice(Choice(t: now, field: "red", room: kind, value: 0)) }
         st.holdRed = 0; st.nudgeRed = nil
@@ -1275,7 +1279,7 @@ case "preset":
         // At night in a known kind of room, the preset's Red Shift becomes that room's level, like the slider.
         // A preset is for now: it holds until the room changes and teaches the curve nothing.
         if roomActive && roomNightness > 0, var st = loadState() {
-            st.holdRed = max(0, min(1, (s.warmth ?? 0) / (roomSunsetFade ? 1 : roomNightness))); roomHoldRed = st.holdRed; roomLevel = roomRed(now)
+            st.holdRed = levelFor(max(0, min(1, s.warmth ?? 0))); roomHoldRed = st.holdRed; roomLevel = roomRed(now)
             if roomNightness >= 0.999, let b = s.keyboardBrightness { st.holdKeys = b; roomHoldKeys = b }
             saveState(st)
         }
