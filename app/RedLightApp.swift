@@ -76,7 +76,7 @@ extension TrueColor {
 struct Ramp: Codable { var start: Date; var seconds: Double; var from: Settings; var to: Settings; var label: String }
 /// Written only by the engine. `disabled` is the master switch; `heldFor` names the app holding true colour.
 struct ModeState: Codable { var mode: String; var daySnapshot: Settings?; var lastSeen: Settings?; var lastNotified: Date?; var ramp: Ramp?; var pausedUntil: Date?
-    var disabled: Bool?; var heldFor: String?; var room: Room?; var holdRed: Double?; var holdKeys: Double? }
+    var disabled: Bool?; var heldFor: String?; var room: Room?; var holdRed: Double?; var holdKeys: Double?; var restedAt: Date? }
 /// The room as the engine last set it: its `kind` (dark, dim or lit) and the level it gave it; `lux` is -1 with no reading.
 struct Room: Codable { var lux: Double; var target: Double; var darkness: Double; var at: Date; var kind: String? }
 struct Learned: Codable {
@@ -841,8 +841,11 @@ final class RoomSensor {
     }()
     private var client: AnyObject?
     /// Whether this Mac has one at all, lid open or closed.
-    var present: Bool { service != nil }
+    var present: Bool { fixed != nil || service != nil }
+    /// REDLIGHT_LUX: a room of your choosing, for tests and documentation captures. The engine reads the same variable.
+    private let fixed = ProcessInfo.processInfo.environment["REDLIGHT_LUX"].flatMap(Double.init)
     func lux() -> Double? {
+        if let v = fixed { return v }
         let root = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
         let closed = IORegistryEntryCreateCFProperty(root, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Bool
         IOObjectRelease(root)
@@ -1072,21 +1075,34 @@ final class Model: ObservableObject {
         keyboardHold.onOverride = { [weak self] v in self?.set("keyboard", String(format: "%.6f", v * 100)) }   // the brightness keys: record the new level
         refresh()
         watchFolder()
+        // Back at launch after a long time off (a restart overnight) is the same as the screen coming back on.
+        let gone = (UserDefaults.standard.object(forKey: "lastSeen") as? Date).map { Date().timeIntervalSince($0) } ?? 0
+        if gone > 150 { runCLI(["check", "back", String(Int(gone))]) }
+        seen()
         Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             if self.source == nil { self.watchFolder() }       // the folder was missing last time: try again
+            self.seen()
             self.refresh()
             self.updater.tick(screenIsPlain: self.isOff || !self.isTinting)
         }
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.gamma.verify() }
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.watchRoom() }
         registerHotkeys()
-        // Waking up: run a check right away so the lid opening at 11 PM never shows 60 s of daylight look.
+        // Waking up: run a check right away so the lid opening at 11 PM never shows 60 s of daylight look. When it is the
+        // screen coming on, the check says how long it was dark (`check back`): the engine then draws at once what it
+        // would otherwise ease, and after hours away in the small hours knows it is morning.
         let nc = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification, NSWorkspace.sessionDidBecomeActiveNotification] {
             nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                self?.runCLI(["check"]); self?.locateIfAuto(); self?.settleRoom()
+                guard let self = self else { return }
+                let away = name == NSWorkspace.screensDidWakeNotification ? Date().timeIntervalSince(self.lastSeen) : 0
+                if name == NSWorkspace.screensDidWakeNotification { self.lastSeen = Date(); UserDefaults.standard.set(self.lastSeen, forKey: "lastSeen") }
+                self.runCLI(away > 90 ? ["check", "back", String(Int(away))] : ["check"]); self.locateIfAuto(); self.settleRoom()
             }
+        }
+        for name in [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification] {
+            nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.seen() }
         }
         NotificationCenter.default.addObserver(forName: .NSSystemTimeZoneDidChange, object: nil, queue: .main) { [weak self] _ in self?.locateIfAuto() }
         locator.onFix = { [weak self] la, lo in
@@ -1145,6 +1161,13 @@ final class Model: ObservableObject {
         src.setCancelHandler { close(fd) }
         src.resume(); source = src
     }
+    /// When you were last here, to the minute: the screen was on. (Checked, not assumed: the timer also runs in the
+    /// moments a sleeping Mac wakes itself with the screen dark, and counting those kept "away" at minutes all night.)
+    private var lastSeen = Date()
+    private func seen() {
+        guard CGDisplayIsAsleep(CGMainDisplayID()) == 0 else { return }
+        lastSeen = Date(); UserDefaults.standard.set(lastSeen, forKey: "lastSeen")
+    }
     func locateIfAuto() { if config.locationSource != "manual" { locator.request() } }
     func useMyLocation() { config.locationSource = "auto"; saveConfig(reapply: false); locator.request() }
 
@@ -1168,10 +1191,10 @@ final class Model: ObservableObject {
     private var roomPending: String?, roomPendingSince = Date.distantPast, roomQuietUntil = Date.distantPast
     static func roomKind(lux: Double, was: String?) -> String {
         switch was {
-        case "dark": return lux > 30 ? "lit" : lux > 8 ? "dim" : "dark"
-        case "dim":  return lux > 22 ? "lit" : lux < 4 ? "dark" : "dim"
-        case "lit":  return lux < 4 ? "dark" : lux < 15 ? "dim" : "lit"
-        default:     return lux < 5 ? "dark" : lux < 20 ? "dim" : "lit"
+        case "dark": return lux > 40 ? "lit" : lux > 8 ? "dim" : "dark"
+        case "dim":  return lux > 40 ? "lit" : lux < 4 ? "dark" : "dim"
+        case "lit":  return lux < 4 ? "dark" : lux < 32 ? "dim" : "lit"
+        default:     return lux < 5 ? "dark" : lux < 34 ? "dim" : "lit"
         }
     }
     /// Just after the lid opens the sensor reads low (3 lux in a 17 lux room): start the averages once it has settled.
@@ -1332,6 +1355,8 @@ final class Model: ObservableObject {
     /// night has the red, but the Auto row stayed dark however often it was pressed.
     var nothingHeld: Bool { nightIsAuto && state?.holdRed == nil && state?.holdKeys == nil }
     func backToAuto() { runCLI(["auto"]) }
+    /// You have slept: the engine is on the morning's gentle level, not the small hours' deep one.
+    var isMorning: Bool { roomKindNow != nil && (state?.restedAt.map { (0..<43200).contains(Date().timeIntervalSince($0)) } ?? false) }
     /// The curve is what the night will do only with a room to go by. Without a sensor (a Mac mini) or with Match Room
     /// Light off, the night is the schedule's own steady level, as it always was, and a chart of a deepening curve isn't true.
     var nightFollowsCurve: Bool { roomSensor.present && (config.roomLight?.enabled ?? true) }
@@ -1566,7 +1591,15 @@ final class Model: ObservableObject {
         keyboardHold.update(keyboardWant(v), idleSeconds: live.keyboardIdleDimSeconds ?? 5)
         if final { set("keyboard", v > 0 ? String(format: "%.6f", v * 100) : "off") }
     }
+    /// The step a drag last sent, per field: letting go repeats it, and sent again the engine ran, logged and taught twice.
+    private var stepSent: [String: String] = [:]
     func set(_ field: String, _ value: String, final: Bool = true) {
+        if final, stepSent[field] == value {
+            stepSent[field] = nil
+            liveQueue.async { DispatchQueue.main.async { [weak self] in self?.scheduleRefresh(after: 0.05) } }   // behind the step itself
+            return
+        }
+        stepSent[field] = final ? nil : value
         switch field {
         case "keyboard": let v = value == "off" ? 0 : (Double(value) ?? 0) / 100; live.keyboardBrightness = v; lastKeyboard = v
         case "idle": live.keyboardIdleDimSeconds = Double(value)
@@ -1896,9 +1929,10 @@ struct NightChart: View {
             }.frame(height: 56)
             GeometryReader { g in
                 let w = g.size.width
-                // A label centred near either end would stick out past the chart and the panel's margin: left out instead.
-                ForEach(ticks.filter { x($0.0, w) >= 18 && x($0.0, w) <= w - 18 }, id: \.0) { t in
-                    Text(t.1).font(CC.subtitle).foregroundStyle(CC.secondary).fixedSize().position(x: x(t.0, w), y: 7)
+                // A label centred near either end would stick out past the chart and the panel's margin: moved in by the few
+                // points that takes (a sunrise at 6:42 lost its "6 AM", the one hour the morning is read by), left out past that.
+                ForEach(ticks.filter { abs(min(max(x($0.0, w), 16), w - 16) - x($0.0, w)) <= 8 }, id: \.0) { t in
+                    Text(t.1).font(CC.subtitle).foregroundStyle(CC.secondary).fixedSize().position(x: min(max(x(t.0, w), 16), w - 16), y: 7)
                 }
             }.frame(height: 14)
         }
@@ -2053,7 +2087,8 @@ struct Panel: View {
         if m.isFading { return m.isNight ? "Sunset in progress" : "Sunrise in progress" }
         if m.isNight && !m.snapshotDaylight {                         // the daytime documentation image says Day, too
             let room = m.roomKindNow.map { " · \($0.capitalized) room" } ?? ""
-            return m.sunriseText.isEmpty ? "Night\(room)" : "Night\(room) · Sunrise at \(m.sunriseText)"
+            let part = m.isMorning ? "Morning" : "Night"       // after sleep, the red starts over (the engine's `redPrior`)
+            return m.sunriseText.isEmpty ? "\(part)\(room)" : "\(part)\(room) · Sunrise at \(m.sunriseText)"
         }
         return m.sunsetText.isEmpty ? "Day" : "Day · Sunset at \(m.sunsetText)"
     }
@@ -2100,11 +2135,15 @@ struct UpdatesSection: View {
                     Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(CC.secondary) }
                     .frame(height: 33).contentShape(Rectangle()).onTapGesture { u.install() }
             } else {
-                HStack { Text("Check for Updates").font(CC.row).foregroundStyle(CC.label); Spacer() }
+                // The version is the row's value, as Control Center rows carry theirs; a line of its own only with news.
+                HStack { Text("Check for Updates").font(CC.row).foregroundStyle(CC.label); Spacer()
+                    if u.status.isEmpty { Text(Updater.current).font(CC.small).foregroundStyle(CC.secondary) } }
                     .frame(height: 33).contentShape(Rectangle()).onTapGesture { u.check(userInitiated: true) }
             }
-            TextRow(text: u.status.isEmpty ? "Version \(Updater.current)" + (u.automatic && u.available != nil ? " · installs when the screen isn’t red" : "")
-                                           : "Version \(Updater.current) · \(u.status)", secondary: true)
+            if !u.status.isEmpty || u.available != nil {
+                TextRow(text: u.status.isEmpty ? "Version \(Updater.current)" + (u.automatic ? " · installs when the screen isn’t red" : "")
+                                               : "Version \(Updater.current) · \(u.status)", secondary: true)
+            }
             SectionEnd()
         }
     }
@@ -2179,7 +2218,7 @@ struct SettingsPage: View {
                 ToggleRow(label: "\(r.name) in True Color", isOn: Binding(get: { r.always }, set: { m.trueColor.remember(r.id, always: $0) }), drawn: m.snapshotMode)
                     .contextMenu { Button("Forget Choice") { m.trueColor.forget(r.id) } }
             }
-            TextRow(text: "Figma, Sketch, Photoshop, Lightroom, video editors and other design and photo apps can show true color while they are in front. Red Light comes back when you switch away.", secondary: true)
+            TextRow(text: "Design and photo apps can show true color while they’re in front.", secondary: true)
             Line()
 
             UpdatesSection(u: m.updater, drawn: m.snapshotMode)

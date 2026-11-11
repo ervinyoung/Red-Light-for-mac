@@ -6,7 +6,9 @@
 import Foundation
 import IOKit
 
-let appDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/RedLight")
+// REDLIGHT_DIR (and REDLIGHT_NOW, REDLIGHT_LUX below) are for tests: another data folder, clock and room.
+let appDir = ProcessInfo.processInfo.environment["REDLIGHT_DIR"].map { URL(fileURLWithPath: $0) }
+    ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/RedLight")
 let configURL  = appDir.appendingPathComponent("config.json")
 let stateURL   = appDir.appendingPathComponent("state.json")
 let learnedURL = appDir.appendingPathComponent("learned.json")
@@ -163,6 +165,8 @@ struct State: Codable {
     var presetWas: Settings?
     /// With no reading (the lid closed), the kind of room there last was: opening on the same kind keeps what's held.
     var roomBefore: String?
+    /// Morning began: you came back after 4:30 AM from three hours or more away (see `redPrior`). Until sunset.
+    var restedAt: Date?
 }
 struct Room: Codable { var lux: Double; var target: Double; var darkness: Double; var at: Date; var kind: String? }
 struct Learned: Codable {
@@ -233,7 +237,9 @@ func kbGetBool(_ sel: String, _ id: UInt64) -> Bool { let (imp, s) = kbImp(sel);
 /// The menu bar app has the keys dark for inactivity (its `keyboard-idle` marker). A marker left by an app that quit or
 /// crashed counts for nothing: only while the app runs.
 func appIdleKeys() -> Bool { FileManager.default.fileExists(atPath: appDir.appendingPathComponent("keyboard-idle").path) && runningApp() }
-func readCurrent() -> Settings {
+/// `record` false for the commands that run outside the lock (`status`, which the app asks for at every refresh): written
+/// from there, a level read part-way through another run's change went over the one that run had just recorded.
+func readCurrent(record: Bool = true) -> Settings {
     var s = Settings(filterEnabled: maGetEnabled(colorCategory), filterType: maGetType(colorCategory), hue: maGetHue(), intensity: maGetInten())
     if let id = kbIDs().first {
         // The menu bar app runs idle-off itself while it sets the keys, and marks it: dark keys then aren't a change.
@@ -250,7 +256,7 @@ func readCurrent() -> Settings {
             if isExtraDim(known) || fading { s.keyboardBrightness = known }
             else {
                 s.keyboardBrightness = v
-                if known == nil || abs(known! - v) > 0.0005 { saveCommanded(Commanded(keyboardBrightness: v)) }
+                if record, known == nil || abs(known! - v) > 0.0005 { saveCommanded(Commanded(keyboardBrightness: v)) }
             }
         } else if s.keyboardAutoBrightness == false {
             s.keyboardBrightness = loadCommanded().keyboardBrightness
@@ -311,7 +317,7 @@ func apply(_ s: Settings, label: String, quiet: Bool = false, ease: Double = 0) 
             saveCommanded(Commanded(keyboardBrightness: b, fadeUntil: ease > 0 && !isExtraDim(b) ? Date().addingTimeInterval(3) : nil))
         }
     }
-    if !quiet { log("applied \(label): \(describe(s))" + (s.warmth.map { abs(lifted($0) - $0) > 0.005 ? String(format: " (dark room: shown at %.2f)", lifted($0)) : "" } ?? "")) }
+    if !quiet { log("applied \(label): \(describe(s))" + (s.warmth.map { abs(lifted($0) - $0) > 0.005 ? String(format: " (%@ room: shown at %.2f)", roomKindNow ?? "no", lifted($0)) : "" } ?? "")) }
 }
 func describe(_ s: Settings) -> String {
     var p: [String] = []
@@ -653,7 +659,7 @@ func startTransition(to mode: String, cfg: Config, learned: Learned, state: Stat
     st.ramp = nil
     // A new night: nothing held over, last night's nudge is spent. Not at sunrise: what you chose rides the fade out (Off
     // at 5 AM came back as full red at the fade's first minute). By day it counts for nothing, and sunset clears it.
-    if mode == "night" { clearNight(&st) }
+    if mode == "night" { clearNight(&st); st.restedAt = nil; roomRested = false; if roomActive { roomLevel = roomRed(now) } }
     roomNightness = nightness(st, now: now)
     // If we woke up mid-transition, pick the fade up where the clock says it should be.
     let began = since ?? now
@@ -683,7 +689,7 @@ func pin(_ r: inout Ramp, _ fields: Set<String>, at cur: Settings) {
         r.to.shadeEnabled = cur.shadeEnabled; r.to.shadeLevel = cur.shadeLevel
     }
 }
-func stepRamp(_ st: inout State, now: Date) {
+func stepRamp(_ st: inout State, now: Date, ease: Double = 60) {
     guard let r = st.ramp else { return }
     let t = now.timeIntervalSince(r.start) / r.seconds
     roomNightness = nightness(st, now: now)
@@ -697,16 +703,23 @@ func stepRamp(_ st: inout State, now: Date) {
             if st.mode == "night", let b = to.keyboardBrightness { st.holdKeys = b; roomHoldKeys = b }
             to.keyboardBrightness = nil
         }
-        apply(to, label: "\(r.label) 100%", ease: 60); st.ramp = nil
+        apply(to, label: "\(r.label) 100%", ease: ease); st.ramp = nil
     }
-    else { apply(blend(r.from, r.to, t), label: "\(r.label) \(Int(t * 100))%", quiet: true, ease: 60) }
+    else { apply(blend(r.from, r.to, t), label: "\(r.label) \(Int(t * 100))%", quiet: true, ease: ease) }
     st.lastSeen = readCurrent()
 }
+/// `-a`: pgrep leaves its own ancestors out unless told to keep them, and the app is one whenever it is the app that asked.
+/// So every command the app sent found no app running: its check at wake read the room itself, from the sensor's first
+/// unsettled reading (0 lux as the lid opens), took the level macOS puts back on the keys for one you had set and held it,
+/// lit keys that were off for inactivity, and set the tint at once under a change the app was easing.
+var appRunning: Bool? = nil
 func runningApp() -> Bool {
-    let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep"); p.arguments = ["-x", appProcessName]
+    if let r = appRunning { return r }
+    let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep"); p.arguments = ["-a", "-x", appProcessName]
     p.standardOutput = Pipe(); p.standardError = Pipe()
     do { try p.run() } catch { return false }
-    p.waitUntilExit(); return p.terminationStatus == 0
+    p.waitUntilExit(); appRunning = p.terminationStatus == 0
+    return appRunning!
 }
 extension Double { func rounded(toPlaces p: Int) -> Double { let m = pow(10.0, Double(p)); return (self * m).rounded() / m } }
 
@@ -776,12 +789,15 @@ func roomLux() -> Double? {
 /// level that tracked it swung with it. The margins between the kinds are wide, so nothing short of a lamp going on or
 /// off moves a room from one to the next. (The app classifies the same way, with averaging and a wait, and sends the
 /// kind; this is for `room <lux>` and the minute check when the app isn't running.)
+/// Lit begins near 35 lux, in the gap between lamp light and room lights (a month of one home's evenings: lamps 6–31
+/// lux, room lights 37 and up). At 20 it ran through the middle of the lamp-lit evening: the same lamp was dim at 19 and
+/// lit, with no red at all, at 20, where 15 % was asked for by hand.
 func roomKind(lux: Double, was: String?) -> String {
     switch was {
-    case "dark": return lux > 30 ? "lit" : lux > 8 ? "dim" : "dark"
-    case "dim":  return lux > 22 ? "lit" : lux < 4 ? "dark" : "dim"
-    case "lit":  return lux < 4 ? "dark" : lux < 15 ? "dim" : "lit"
-    default:     return lux < 5 ? "dark" : lux < 20 ? "dim" : "lit"
+    case "dark": return lux > 40 ? "lit" : lux > 8 ? "dim" : "dark"
+    case "dim":  return lux > 40 ? "lit" : lux < 4 ? "dark" : "dim"
+    case "lit":  return lux < 4 ? "dark" : lux < 32 ? "dim" : "lit"
+    default:     return lux < 5 ? "dark" : lux < 34 ? "dim" : "lit"
     }
 }
 // MARK: - Your night
@@ -797,7 +813,9 @@ func roomKind(lux: Double, was: String?) -> String {
 // Backtested on those choices, each predicted from the ones before it: 18 points off with one number per room, 8 with this.
 /// `clock`: the night clock where you were when you chose. `t` read in today's zone moved every lesson by the difference
 /// after a flight: 11 PM at home counted as 2 AM in New York, when 11 PM is what you meant, wherever you are.
+/// `rested`: chosen in the morning, after sleep (see `redPrior`). `lux`: the room's light then, should the kinds' edges move.
 struct Choice: Codable { var t: Date; var field: String; var room: String; var value: Double; var clock: Double? = nil
+    var rested: Bool? = nil; var lux: Double? = nil
     var hour: Double { clock ?? nightClock(t) } }
 struct Nudge: Codable { var delta: Double; var at: Date; var room: String }
 let choicesURL = appDir.appendingPathComponent("choices.jsonl")
@@ -837,7 +855,12 @@ func along(_ pts: [(Double, Double)], _ u: Double) -> Double {
 /// The curve for someone who has told Red Light nothing yet: 7 PM, 9 PM, 11 PM, 1 AM, 3 AM in a dark room, half that in
 /// a dim one, nothing with the lights on. From 10 AM it comes back down to meet itself at noon, where the night clock
 /// starts again: only a night that runs on past noon sees that (Turn On Now, a polar winter), and it fell 80 points there.
-func redPrior(_ u: Double, _ kind: String) -> Double {
+/// After you have slept it is morning, whatever the clock makes of the night: the red starts over as gently as the evening
+/// began, flat until the sunrise fade takes it away, and it learns on its own, apart from the nights you sat up. (Waking
+/// at 6:47 AM to the 3 AM curve's all-red and dragging it to 30 % is where this comes from; and winter puts sunrise after
+/// most alarms.)
+func redPrior(_ u: Double, _ kind: String, rested: Bool = false) -> Double {
+    if rested { return kind == "dark" ? 0.30 : kind == "dim" ? 0.15 : 0 }
     let dark = along([(420, 0.20), (540, 0.30), (660, 0.55), (780, 0.80), (900, 1), (1320, 1), (1440, 0.20)], u)
     return kind == "dark" ? dark : kind == "dim" ? dark / 2 : 0
 }
@@ -854,17 +877,18 @@ func nearInTime(_ a: Double, _ b: Double) -> Double { let d = abs(a - b); return
 /// The curve at `d`: the prior, bent by the choices near that time of night. Two "choices' worth" of weight stay with
 /// the prior, so one nudge moves the curve about a third of the way and repeated ones take it the rest. Each newer choice
 /// counts a little over the one before it.
-func predictRed(_ kind: String, at d: Date) -> Double {
+func predictRed(_ kind: String, at d: Date, rested: Bool? = nil) -> Double {
+    let rested = rested ?? roomRested
     let u = nightClock(d); var num = 0.0, den = 0.0
-    for (age, c) in roomChoices.filter({ $0.field == "red" }).reversed().enumerated() {
-        let cu = c.hour; var w = nearInTime(u, cu) * pow(0.97, Double(age)), off = c.value - redPrior(cu, c.room)
+    for (age, c) in roomChoices.filter({ $0.field == "red" && ($0.rested ?? false) == rested }).reversed().enumerated() {
+        let cu = c.hour; var w = nearInTime(u, cu) * pow(0.97, Double(age)), off = c.value - redPrior(cu, c.room, rested: rested)
         if c.room != kind {
             if c.room == "lit" || kind == "lit" { continue }
             w /= 2; off *= kind == "dim" ? 0.5 : 2                       // dark and dim share what they learn, at their scale
         }
         num += w * off; den += w
     }
-    return max(0, min(1, redPrior(u, kind) + num / (2 + den)))
+    return max(0, min(1, redPrior(u, kind, rested: rested) + num / (2 + den)))
 }
 func predictKeys(_ kind: String, at d: Date) -> Double {
     let u = nightClock(d); var num = 0.0, den = 0.0
@@ -889,6 +913,8 @@ func kbFromTicks(_ t: Double) -> Double { t <= 0 ? 0 : t < 54 ? t / 54 * kbFloor
 var roomLevel = 0.0, roomActive = false, roomNightness = 0.0, roomKindNow: String? = nil
 var roomEnabled = true, roomAdapts = true, roomChoices: [Choice] = []
 var roomNudge: Nudge? = nil, roomHoldRed: Double? = nil, roomHoldKeys: Double? = nil, roomSunsetFade = false
+var roomRested = false                              // it is morning (State.restedAt)
+var clockNow = Date()                               // the time this run reads the night at (`now`, once main has it)
 var roomOutside = 0.0                               // the warmth at the day end of a fade under way (see `nightness`)
 func setRoomContext(cfg: Config, learned: Learned, state: State?, now: Date) {
     roomEnabled = (cfg.roomLight ?? RoomLight()).enabled
@@ -897,6 +923,7 @@ func setRoomContext(cfg: Config, learned: Learned, state: State?, now: Date) {
     roomKindNow = roomEnabled ? state?.room?.kind : nil
     roomActive = roomKindNow != nil
     roomNudge = state?.nudgeRed; roomHoldRed = state?.holdRed; roomHoldKeys = state?.holdKeys
+    roomRested = state?.restedAt.map { (0..<43200).contains(now.timeIntervalSince($0)) } ?? false
     roomLevel = roomRed(now)
     roomNightness = nightness(state, now: now)
     roomSunsetFade = state?.mode == "night" && state?.ramp != nil
@@ -926,11 +953,18 @@ func levelFor(_ shown: Double) -> Double { roomSunsetFade ? shown : max(0, (show
 func chooseRed(_ st: inout State, _ shown: Double, now: Date) {
     guard let kind = roomKindNow, roomNightness > 0 else { return }
     let x = levelFor(shown)
+    let lux = st.room.flatMap { $0.lux >= 0 ? $0.lux : nil }
     if x <= 0.01 {
         if roomAdapts { saveChoice(Choice(t: now, field: "red", room: kind, value: 0)) }
         st.holdRed = 0; st.nudgeRed = nil
     } else {
-        if roomAdapts { saveChoice(Choice(t: now, field: "red", room: kind, value: max(0, min(1, shown)))) }
+        // Through the sunrise fade the lesson is the level that draws what you asked for: the fade scales what the curve
+        // gives tomorrow too, so 30 % taught as seen drew 19 % at the same minute the next morning, and every morning
+        // after. Not in the fade's last half: too little night is left there to read a level from.
+        let lesson: Double? = roomSunsetFade || roomNightness >= 0.999 ? shown : roomNightness >= 0.5 ? x : nil
+        if roomAdapts, let v = lesson {
+            saveChoice(Choice(t: now, field: "red", room: kind, value: max(0, min(1, v)), rested: roomRested ? true : nil, lux: lux))
+        }
         st.holdRed = nil; st.nudgeRed = Nudge(delta: x - predictRed(kind, at: now), at: now, room: kind)
     }
     roomHoldRed = st.holdRed; roomNudge = st.nudgeRed; roomLevel = roomRed(now)
@@ -939,7 +973,7 @@ func chooseRed(_ st: inout State, _ shown: Double, now: Date) {
 /// The keys hold what you set until the room changes; the curve learns from it, except from off.
 func chooseKeys(_ st: inout State, _ b: Double, now: Date) {
     guard roomActive, roomNightness >= 0.999, let kind = roomKindNow else { return }
-    if roomAdapts { saveChoice(Choice(t: now, field: "keys", room: kind, value: kbTicksOf(b))) }
+    if roomAdapts { saveChoice(Choice(t: now, field: "keys", room: kind, value: kbTicksOf(b), lux: st.room.flatMap { $0.lux >= 0 ? $0.lux : nil })) }
     st.holdKeys = b; roomHoldKeys = b
     log(String(format: "%@ room: you chose keyboard %.6f", kind, b))
 }
@@ -955,7 +989,7 @@ func releasePreset(_ st: inout State) {
 func clearNight(_ st: inout State) {
     st.nudgeRed = nil; st.holdRed = nil; st.holdKeys = nil; st.presetWas = nil
     roomNudge = nil; roomHoldRed = nil; roomHoldKeys = nil
-    if roomActive { roomLevel = roomRed(Date()) }
+    if roomActive { roomLevel = roomRed(clockNow) }
 }
 /// How far into night the schedule is: 0 by day, 1 at night, and the fade's progress in between, so the room's level
 /// rides the sunset fade in and the sunrise fade out rather than jumping at either.
@@ -987,7 +1021,7 @@ func roomKeyboard(for s: Settings) -> Double? {
           (s.keyboardAutoBrightness ?? kbIDs().first.map { kbGetBool("isAutoBrightnessEnabledForKeyboard:", $0) } ?? false) != true,
           (s.warmth ?? loadShade().base ?? 0) > 0.001 else { return nil }
     if let h = roomHoldKeys { return h }
-    return kbFromTicks(keysStep(predictKeys(kind, at: Date()), from: loadCommanded().keyboardBrightness.map(kbTicksOf)))
+    return kbFromTicks(keysStep(predictKeys(kind, at: clockNow), from: loadCommanded().keyboardBrightness.map(kbTicksOf)))
 }
 /// Sets the room: `kind` from the app (its reading averaged, past the margins, held for seconds), or classified here
 /// from `lux` or the sensor. A new kind of room lets go of anything held for now. True if the look is out of date.
@@ -1002,7 +1036,8 @@ func senseRoom(_ st: inout State, now: Date, kind given: String? = nil, lux luxG
     st.roomBefore = kind == nil && enabled ? before : nil
     if let kind = kind {
         roomKindNow = kind; roomActive = true; roomLevel = roomRed(now)
-        if kind != was { log(String(format: "%@ room%@: red shift %.0f%%", kind, lux.map { String(format: " (%.0f lux)", $0) } ?? "", roomLevel * 100)) }
+        // By day there is no red to speak of (the engine senses then only without the app): "red shift 77%" at 7 AM wasn't so.
+        if kind != was { log(kind + " room" + (lux.map { String(format: " (%.0f lux)", $0) } ?? "") + (roomNightness > 0 ? String(format: ": red shift %.0f%%", min(1, roomLevel) * 100) : "")) }
         st.room = Room(lux: lux ?? st.room?.lux ?? -1, target: roomLevel, darkness: roomLevel, at: now, kind: kind)
     } else { st.room = nil; roomKindNow = nil; roomActive = false }
     return roomOutOfDate()
@@ -1050,7 +1085,8 @@ if !["status", "suntimes", "learned", "curve", "forecast"].contains(cmd) {
 let needsNoSun = ["off", "hold", "release", "set", "shade", "forget", "curve"].contains(cmd) || (cmd == "check" && loadState()?.disabled == true)
 guard let cfg = loadConfig() ?? (needsNoSun ? Config(latitude: 0, longitude: 0, night: Settings(), dayDefaults: Settings()) : nil) else { exit(1) }
 var learned = loadLearned()
-let now = Date()
+let now = ProcessInfo.processInfo.environment["REDLIGHT_NOW"].flatMap { ISO8601DateFormatter().date(from: $0) } ?? Date()
+clockNow = now
 let fmt = DateFormatter(); fmt.dateStyle = .none; fmt.timeStyle = .short
 let fadeMinutes = cfg.fadeMinutes ?? 30
 setRoomContext(cfg: cfg, learned: learned, state: loadState(), now: now)
@@ -1072,6 +1108,16 @@ case "check":
     }
     let held = st.heldFor != nil
     holdTint = held                     // transitions and fades carry on underneath a hold; only the tint waits
+    // `check back <seconds>`: from the app, as the screen comes on after that long dark. Nobody watched the look change,
+    // so this run draws it at once: eased, opening the lid showed the red creeping for a minute from where last night left
+    // it. And back after 4:30 AM from three hours or more away, you have slept: it's morning (see `redPrior`), last
+    // night's nudge is spent and nothing is held over. (3 AM isn't: back then, it was all the red there is that was wanted.)
+    let back = CommandLine.arguments.count > 3 && CommandLine.arguments[2] == "back" ? Double(CommandLine.arguments[3]) : nil
+    if let away = back, away >= 3 * 3600, nightClock(now) >= 990, !roomRested, st.mode == "night" || st.ramp != nil {
+        st.restedAt = now; roomRested = true
+        releasePreset(&st); clearNight(&st)
+        log(String(format: "morning: back after %.1f hours away", away / 3600))
+    }
     let (observed, changes) = observe(cfg: cfg, learned: learned, state: st, now: now)
     st = observed
     pruneEvents(olderThan: now.addingTimeInterval(-Double((cfg.learning ?? Learning()).lookbackDays + 7) * 86400))
@@ -1104,10 +1150,10 @@ case "check":
                 log("you adjusted \(changes.sorted().joined(separator: ", ")) mid-transition; leaving that as you set it")
                 pin(&r, changes, at: cur); st.ramp = r
             }
-            stepRamp(&st, now: now); redrawn = true
+            stepRamp(&st, now: now, ease: back != nil ? 0 : 60); redrawn = true
         }
     }
-    if roomMoved && !redrawn { reliftWarmth(&st) }
+    if roomMoved && !redrawn { reliftWarmth(&st, ease: back != nil ? 0 : nil) }
     saveState(st)
 case "room":
     // `room <lux>`: the app's filtered reading, after the room's light has settled at a new level. `room none`: no
@@ -1145,6 +1191,7 @@ case "forecast":
     // under way, or by day tonight's, between the switches as they fall: paired by which sunrise and sunset were nearest
     // now, it was last night all day and the night before that until 12 hours past sunrise. Polar: the day around now.
     let st = loadState()
+    let morning = st?.restedAt.flatMap { (0..<43200).contains(now.timeIntervalSince($0)) ? $0 : nil }
     let ts = transitions(cfg: cfg, learned: learned, now: now)
     let dusk = isNight(cfg: cfg, learned: learned, now: now) ? ts.last(where: { $0.night && $0.at <= now })?.at : ts.first(where: { $0.night && $0.at > now })?.at
     let dawn = dusk.flatMap { d in ts.first(where: { !$0.night && $0.at > d })?.at }
@@ -1152,7 +1199,7 @@ case "forecast":
     var rooms: [String: [[Double]]] = [:]
     for kind in ["dark", "dim", "lit"] {
         rooms[kind] = stride(from: from.timeIntervalSince1970, through: to.timeIntervalSince1970, by: 900).map { t in
-            let d = Date(timeIntervalSince1970: t); return [t, predictRed(kind, at: d)]
+            let d = Date(timeIntervalSince1970: t); return [t, predictRed(kind, at: d, rested: morning.map { d >= $0 } ?? false)]
         }
     }
     let out: [String: Any] = ["from": from.timeIntervalSince1970, "to": to.timeIntervalSince1970, "now": now.timeIntervalSince1970,
@@ -1273,7 +1320,7 @@ case "set":
         if off { s.filterEnabled = false; s.intensity = 0 } else { s.filterEnabled = true; s.filterType = 16; s.hue = 1.0; s.intensity = max(0, min(1, num / 100)) }
     default: print("unknown field '\(field)' — use warmth, keyboard, idle, shade or tint"); exit(2)
     }
-    apply(s, label: "SET \(field)")
+    apply(s, label: "SET \(field)", quiet: field == "warmth" && roomActive && roomNightness > 0)     // chooseRed has said it
 case "preset":
     var c = cfg
     var presets = c.presets ?? []
@@ -1389,7 +1436,7 @@ case "status":
     if let r = st?.ramp { head += "   fading \(Int(min(1, now.timeIntervalSince(r.start) / r.seconds) * 100))%" }
     head += "   switches: day at \(eff.rise.map(fmt.string) ?? "-"), night at \(eff.set.map(fmt.string) ?? "-")"
     print(head)
-    var cur = readCurrent(); let base = cur.warmth; let sh = loadShade(); cur.warmth = sh.warmth ?? base
+    var cur = readCurrent(record: false); let base = cur.warmth; let sh = loadShade(); cur.warmth = sh.warmth ?? base
     // `warmth` as drawn (the slider shows it); `planned` the chosen warmth beneath a dark room's lift.
     let roomNote = (base.map { abs((sh.warmth ?? $0) - $0) > 0.005 ? String(format: " planned=%.2f", $0) : "" } ?? "")
         + (st?.room.map { ($0.kind.map { " room=\($0)" } ?? "") + ($0.lux >= 0 ? String(format: " lux=%.0f", $0.lux) : "") } ?? "")

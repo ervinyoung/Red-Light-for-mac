@@ -118,8 +118,8 @@ the kind of room you're in. It reads your Mac's ambient light sensor and sorts t
 | Room | Light | Red Shift at 8 PM | At 11 PM | At 2 AM | Keyboard backlight |
 | --- | --- | --- | --- | --- | --- |
 | Dark | Under about 4 lux: lamps off, the screen is the main light | 25% | 55% | 90% | Extra Dim 2, then Extra Dim 1 late at night |
-| Dim | About 4–20 lux: a lamp across the room | 12% | 28% | 45% | Extra Dim 4, then Extra Dim 3 |
-| Lit | Over about 20 lux: the room lights are on | Off | Off | Off | 1% |
+| Dim | About 4–35 lux: lamp light | 12% | 28% | 45% | Extra Dim 4, then Extra Dim 3 |
+| Lit | Over about 35 lux: the room lights are on | Off | Off | Off | 1% |
 
 These are the starting curves. In a dark room, the sensor mostly measures your screen's own light reflected
 back, so the reading moves between 0 and 5 lux as the page changes. Sorting rooms into kinds with wide margins
@@ -141,6 +141,13 @@ sensor, which MacBooks have. Without one, night is a steady level.
 **Presets are for now.** A preset holds its look until the room changes and teaches nothing. Turning Red Shift
 off works the same way. To go back at any time, click **Auto** in the panel.
 
+**Mornings start over.** The curve deepens toward the small hours for the nights you stay up. After you've
+slept, that isn't what you want: if you come back to your Mac after 4:30 AM, having been away for three hours or
+more, Red Light treats it as morning. Red Shift starts again at a gentle level (30% in a dark room, 15% in a dim
+one, off in a lit one) until the sunrise fade takes it away, and the panel says **Morning**. Morning adjustments
+teach the morning only, and anything held from the night before is let go. Coming back at 3 AM doesn't count:
+the night curve stays.
+
 Red Light filters the sensor the way True Tone and auto-brightness do, so changes are hard to notice:
 
 - It reads the sensor twice a second and keeps a fast average (2 seconds) and a slow average (8 seconds).
@@ -150,8 +157,8 @@ Red Light filters the sensor the way True Tone and auto-brightness do, so change
 - It draws the change continuously, starting and ending gently, over 15 to 90 seconds depending on its size.
   The keyboard fades over 2 seconds in macOS's range, and in about a second between Extra Dim levels.
 - While a change plays out, and for 5 seconds after, the screen's own changing light can't start another one.
-- When you open the lid, it waits for the sensor to settle, then sets the room at once, because you may be
-  somewhere else.
+- When you open the lid, it draws the look for the hour at once, waits for the sensor to settle, then sets
+  the room at once, too, because you may be somewhere else.
 
 The look follows the sunset and sunrise fades, so it never jumps at a transition, and each minute's fade step is
 drawn across the minute, too. By day, while paused, and with the lid closed, Red Shift is your own level.
@@ -199,7 +206,7 @@ Red Light stores its files in `~/Library/Application Support/RedLight`:
 | `config.json` | The night preset, day defaults, location and its source, fade length, learning settings, presets, and shortcuts. |
 | `state.json` | The master switch, mode, day snapshot, current transition, pause, true-color hold, room light, tonight's nudge, and anything held for now. |
 | `learned.json` | Adopted defaults and their history. |
-| `choices.jsonl` | What you chose at night: the time, the kind of room, and the value. Your night's curves are built from these. |
+| `choices.jsonl` | What you chose at night: the time, the kind of room and its light, whether it was morning, and the value. Your night's curves are built from these. |
 | `events.jsonl` | Recorded manual changes, removed after the lookback window. |
 | `shade.json` | What the app draws: the screen shade, Red Shift, and gamma multipliers. |
 | `commanded.json` | The last keyboard brightness that Red Light set. The hardware reports 0 after the backlight dims. |

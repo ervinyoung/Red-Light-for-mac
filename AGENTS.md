@@ -29,8 +29,8 @@ How to uphold the rule in code:
 ## Repo layout
 
 - `app/RedLightApp.swift` — SwiftUI menu bar pane, plus first-launch setup (`enum Setup`) and the signed
-  updater (`Updater`) (~1,400 lines, everything UI lives here)
-- `engine/redlight.swift` — the CLI + launchd scheduler (~900 lines)
+  updater (`Updater`) (~2,300 lines, everything UI lives here)
+- `engine/redlight.swift` — the CLI + launchd scheduler (~1,500 lines)
 - `app/build.sh` — builds the app into `/Applications` (or the path given) with the engine inside it at
   `Contents/Helpers/redlight`; signs with Developer ID, else Apple Development, else ad-hoc
 - `install.sh` — install from source: builds the app, installs its engine, config seed, LaunchAgent (re-run to
@@ -45,6 +45,26 @@ How to uphold the rule in code:
   you launch last owns the installed engine: one built there by hand lasts only until the next app launch
 - `tools/` — documentation images (`--snapshot` renders the pane off-screen to PNG; flags: `settings`, `daylight`,
   `light`, `clear`), the disk image (`make-dmg.sh`, `dmg-background.swift`) and update signing (`sign-update.swift`)
+
+## Testing the engine
+
+The engine reads three environment variables, for tests: `REDLIGHT_DIR` (another data folder), `REDLIGHT_NOW`
+(the clock, ISO 8601, for example `2026-11-11T05:31:00-08:00`) and `REDLIGHT_LUX` (the room; the app reads this
+one too). Copy `~/Library/Application Support/RedLight` to a scratch folder and run the built engine against it to
+test time-of-night logic without touching real state:
+
+```sh
+REDLIGHT_DIR=/tmp/rl REDLIGHT_NOW=2026-11-11T05:31:00-08:00 REDLIGHT_LUX=1 dist/Red\ Light.app/Contents/Helpers/redlight check back 20000
+```
+
+The sandboxed engine still sets the real tint and keyboard, so restore with a real `redlight check` afterwards.
+
+Two things that have bitten before:
+
+- The engine asks whether the app is running with `pgrep -a -x`. Without `-a`, pgrep leaves out its own ancestors,
+  so every command the app itself launched saw "app not running" while tests run from a terminal passed.
+- Tests that fake a room fight the running app's real sensor. Launch the app with `REDLIGHT_LUX` set, or test in
+  the kind of room the Mac is really in.
 
 ## Working on the UI
 
